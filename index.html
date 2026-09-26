@@ -213,6 +213,42 @@ table.simple th{color:var(--muted);font-weight:600;font-size:11px;text-transform
 .svc-opt .nome{font-size:14.5px;color:var(--ink);}
 .svc-opt .prezzo{font-size:12.5px;color:var(--pink-deep);font-weight:600;white-space:nowrap;flex-shrink:0;}
 
+.cli-select{position:relative;}
+.cli-select-trigger{
+  width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);display:flex;align-items:center;justify-content:space-between;gap:10px;
+  cursor:pointer;transition:border-color 0.15s, box-shadow 0.15s;
+}
+.cli-select-trigger:hover{border-color:var(--pink);}
+.cli-select.open .cli-select-trigger{border-color:var(--pink);box-shadow:0 0 0 3px var(--pink-soft);}
+.cli-select-trigger .placeholder{color:var(--muted);font-size:14.5px;}
+.cli-select-trigger .chosen{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.cli-select-trigger .chosen .nome{font-family:'Fraunces',Georgia,serif;font-size:15.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cli-select-trigger .chosen .dettagli{font-size:12px;color:var(--pink-deep);}
+.cli-select-trigger .chev{flex-shrink:0;color:var(--pink);transition:transform 0.2s ease;}
+.cli-select.open .cli-select-trigger .chev{transform:rotate(180deg);}
+.cli-panel{
+  position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:30;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--shadow-float);padding:8px;
+  animation:svcPanelIn 0.12s ease-out;
+}
+.cli-search-input{
+  width:100%;padding:9px 12px;border:1.5px solid var(--line);border-radius:var(--r-sm);
+  font-size:14.5px;margin-bottom:6px;box-sizing:border-box;font-family:inherit;
+}
+.cli-search-input:focus{outline:none;border-color:var(--pink);}
+.cli-opts-list{max-height:260px;overflow-y:auto;}
+.cli-opt{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 10px;border-radius:var(--r-sm);cursor:pointer;transition:background 0.12s;
+}
+.cli-opt:hover{background:var(--pink-soft);}
+.cli-opt.selected{background:var(--pink-soft);}
+.cli-opt .nome{font-size:14.5px;color:var(--ink);}
+.cli-opt .tel{font-size:12.5px;color:var(--pink-deep);font-weight:600;white-space:nowrap;flex-shrink:0;}
+.cli-opt-empty{padding:14px 10px;text-align:center;color:var(--muted);font-size:13.5px;}
+
 .log-line{font-size:12px;color:var(--muted);padding:6px 0;border-bottom:1px dashed var(--line);}
 
 .warn-box{
@@ -223,6 +259,17 @@ footer.disclaimer{
   max-width:760px;margin:24px auto 100px;padding:0 16px;
   font-size:11px;color:var(--muted);line-height:1.6;
 }
+footer.disclaimer .footer-links{margin-top:5px;}
+footer.disclaimer .footer-links button{
+  background:none;border:none;padding:0;margin-right:10px;
+  font-size:11px;color:var(--muted);text-decoration:underline;cursor:pointer;font-family:inherit;
+}
+footer.disclaimer .footer-links button:hover{color:var(--pink-deep);}
+.pagina-legale h3{font-family:'Fraunces',Georgia,serif;font-size:16px;color:var(--pink-deep);margin:20px 0 6px;}
+.pagina-legale h3:first-of-type{margin-top:4px;}
+.pagina-legale p{font-size:13.5px;line-height:1.6;color:var(--ink);margin:0 0 10px;}
+.pagina-legale ul{margin:0 0 10px;padding-left:20px;}
+.pagina-legale li{font-size:13.5px;line-height:1.6;color:var(--ink);margin-bottom:4px;}
 
 nav.bottomnav{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
@@ -437,6 +484,7 @@ try{
 /* ====================== STATO ====================== */
 let DB = null; // {services, pros, appts, clients, logs}
 let currentRole = "cliente";
+let paginaLegale = null; // null | "privacy" | "cookie" | "termini"
 let loadedVersion = null;
 
 function uid(p){ return p + Math.random().toString(36).slice(2,9); }
@@ -596,10 +644,14 @@ function render(){
     return;
   }
   aggiornaStatiAutomatici();
-  if(currentRole==="cliente") app.innerHTML = renderCliente();
-  if(currentRole==="professionista") app.innerHTML = renderProfessionista();
-  if(currentRole==="admin") app.innerHTML = renderAdmin();
-  document.getElementById('footerNote').innerHTML = "";
+  if(paginaLegale){
+    app.innerHTML = renderPaginaLegale(paginaLegale);
+  } else {
+    if(currentRole==="cliente") app.innerHTML = renderCliente();
+    if(currentRole==="professionista") app.innerHTML = renderProfessionista();
+    if(currentRole==="admin") app.innerHTML = renderAdmin();
+  }
+  document.getElementById('footerNote').innerHTML = renderFooterLinks();
   attachHandlers();
   if(focusInfo){
     const nuovoCampo = document.getElementById(focusInfo.id);
@@ -623,11 +675,19 @@ document.getElementById('roleNav').addEventListener('click', (e)=>{
 });
 
 document.addEventListener('click', (e)=>{
-  if(!servizioDropdownAperto) return;
-  const box = document.getElementById('svc-select');
-  if(box && !box.contains(e.target)){
-    servizioDropdownAperto = false;
-    render();
+  if(servizioDropdownAperto){
+    const box = document.getElementById('svc-select');
+    if(box && !box.contains(e.target)){
+      servizioDropdownAperto = false;
+      render();
+    }
+  }
+  if(staffBooking && staffBooking.clienteDropdownAperto){
+    const box2 = document.getElementById('cli-select');
+    if(box2 && !box2.contains(e.target)){
+      staffBooking.clienteDropdownAperto = false;
+      render();
+    }
   }
 });
 
@@ -854,12 +914,14 @@ function renderStoricoCliente(){
     const futuro = (a.data+"T"+a.ora) >= new Date().toISOString().slice(0,16);
     const oreAllAppuntamento = (new Date(a.data+"T"+a.ora+":00") - new Date()) / (1000*60*60);
     const entro48 = oreAllAppuntamento >= 48;
+    const pagamentoDaCompletare = a.pagamento && (a.pagamento.stato==="in_attesa" || a.pagamento.stato==="fallito") && !a.pagatoManuale && a.stato!=="Annullato";
     html += `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
       <div class="appt-row">
         <div><strong>${s?s.name:'Servizio'}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${p?p.nome:''}</div></div>
         <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
       </div>
       <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
+      ${pagamentoDaCompletare ? `<div class="actions-row"><button class="btn small" data-riprova-pagamento="${a.id}">Paga €${a.pagamento.importo}</button></div>` : ''}
       ${futuro && a.stato==="Confermato" ? `
       ${!entro48 && a.pagamento ? `<div class="warn-box">Sei entro le 48 ore dall'appuntamento: annullando, l'acconto/importo versato non viene rimborsato.</div>` : ''}
       <div class="actions-row">
@@ -1039,6 +1101,8 @@ function apriPrenotazioneInterna(scope){
     scope,
     clienteMode: "esistente",
     clienteId: "",
+    clienteQuery: "",
+    clienteDropdownAperto: false,
     nome: "",
     telefono: "",
     area: scope.kind==="staff" ? getPro(scope.proId).aree[0] : null,
@@ -1052,6 +1116,18 @@ function apriPrenotazioneInterna(scope){
 }
 
 function chiudiPrenotazioneInterna(){ staffBooking = null; render(); }
+
+function clientiFiltrati(query){
+  const ordinati = DB.clients.slice().sort((a,b)=>a.nome.localeCompare(b.nome));
+  const q = (query||"").trim().toLowerCase();
+  if(!q) return ordinati;
+  const qDigits = q.replace(/\D/g,'');
+  return ordinati.filter(c=>{
+    const nomeMatch = c.nome.toLowerCase().includes(q);
+    const telMatch = qDigits.length>0 && c.telefono.replace(/\D/g,'').includes(qDigits);
+    return nomeMatch || telMatch;
+  });
+}
 
 function renderPrenotazioneInterna(){
   const sb = staffBooking;
@@ -1067,12 +1143,25 @@ function renderPrenotazioneInterna(){
     </div>
   </div>`;
   if(sb.clienteMode==="esistente"){
-    const clientiOrdinati = DB.clients.slice().sort((a,b)=>a.nome.localeCompare(b.nome));
-    html += `<div class="field"><select id="sb-cliente-esistente">
-      <option value="">Seleziona cliente...</option>
-      ${clientiOrdinati.map(c=>`<option value="${c.id}" ${sb.clienteId===c.id?'selected':''}>${esc(c.nome)} — ${esc(c.telefono)}</option>`).join('')}
-    </select></div>`;
-    if(clientiOrdinati.length===0) html += `<div class="empty">Nessuna cliente registrata ancora — usa "Nuova cliente".</div>`;
+    const clienteScelta = sb.clienteId ? DB.clients.find(c=>c.id===sb.clienteId) : null;
+    const filtrati = clientiFiltrati(sb.clienteQuery);
+    html += `<div class="field"><div class="cli-select ${sb.clienteDropdownAperto?'open':''}" id="cli-select">
+      <div class="cli-select-trigger" id="cli-select-trigger">
+        ${clienteScelta
+          ? `<div class="chosen"><div class="nome">${esc(clienteScelta.nome)}</div><div class="dettagli">${esc(clienteScelta.telefono)}</div></div>`
+          : `<span class="placeholder">Seleziona cliente...</span>`}
+        <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      ${sb.clienteDropdownAperto ? `<div class="cli-panel">
+        <input type="text" id="cli-search-input" class="cli-search-input" placeholder="Cerca per nome o telefono..." value="${esc(sb.clienteQuery||'')}" autocomplete="off">
+        <div class="cli-opts-list">
+          ${filtrati.length ? filtrati.map(c=>`<div class="cli-opt ${sb.clienteId===c.id?'selected':''}" data-scegli-cliente="${c.id}">
+            <span class="nome">${esc(c.nome)}</span><span class="tel">${esc(c.telefono)}</span>
+          </div>`).join('') : `<div class="cli-opt-empty">Nessuna cliente trovata</div>`}
+        </div>
+      </div>` : ''}
+    </div></div>`;
+    if(DB.clients.length===0) html += `<div class="empty">Nessuna cliente registrata ancora — usa "Nuova cliente".</div>`;
   } else {
     html += `<div class="field"><label>Nome e cognome</label><input type="text" id="sb-nome" value="${esc(sb.nome)}"></div>
     <div class="field"><label>Telefono</label><input type="tel" id="sb-telefono" value="${esc(sb.telefono)}"></div>`;
@@ -1206,7 +1295,6 @@ function renderAdmin(){
     <button data-atab="campagne" class="${adminTab==='campagne'?'active':''}">Campagne WhatsApp</button>
     <button data-atab="log" class="${adminTab==='log'?'active':''}">Log</button>
     <button data-atab="accessi" class="${adminTab==='accessi'?'active':''}">Accessi</button>
-    <button data-atab="checklist" class="${adminTab==='checklist'?'active':''}">Da confermare</button>
   </div>`;
 
   if(adminTab==="agenda") html += renderAdminAgenda();
@@ -1215,7 +1303,6 @@ function renderAdmin(){
   if(adminTab==="campagne") html += renderAdminCampagne();
   if(adminTab==="log") html += renderAdminLog();
   if(adminTab==="accessi") html += renderAdminAccessi();
-  if(adminTab==="checklist") html += renderChecklist();
   return html;
 }
 
@@ -1287,6 +1374,11 @@ function renderAdminClienti(){
         </select>
         <button class="btn ghost small" data-riscatta-btn="${c.id}">Riscatta premio</button>
       </div>` : ''}
+      <div class="actions-row" style="margin-top:8px;align-items:center;">
+        <input type="number" min="1" step="1" data-punti-input="${c.id}" placeholder="punti" style="width:70px;padding:6px 8px;font-size:12px;">
+        <button class="btn ghost small" data-punti-agg="${c.id}">+ Aggiungi punti</button>
+        <button class="btn ghost small" data-punti-tog="${c.id}">- Togli punti</button>
+      </div>
     </div>`;
   });
   return html;
@@ -1380,33 +1472,96 @@ function renderAdminAccessi(){
   return html;
 }
 
-function renderChecklist(){
-  const items = [
-    {testo:"Staff attivo: nomi, ruoli e aree assegnate", stato:"confermato", nota:"Nicoletta (Onicotecnica), Marika (Parrucchiera), Marcella (Estetista), Maria (Make-up)"},
-    {testo:"Durata reale di ogni servizio del listino", stato:"provvisorio", nota:"lasciate le stime di partenza, da verificare con calma"},
-    {testo:"Servizi prenotabili online vs \"da concordare\"", stato:"confermato", nota:"impostazione attuale approvata"},
-    {testo:"Regole di modifica/annullamento", stato:"confermato", nota:"soglia 48 ore; sotto le 48h l'acconto resta comunque perso"},
-    {testo:"Ragione sociale, email di contatto, testi legali", stato:"parziale", nota:"Srl, Nicoletta amministratore unico · email: nimahairbeautybellizzi@gmail.com · mancano ancora i testi di privacy/cookie/termini"},
-    {testo:"Configurazione reale SumUp e WhatsApp Business Platform", stato:"parziale", nota:"SumUp Business già attivo in negozio · numero già su WhatsApp Business · resta da collegare tecnicamente l'app a entrambi (API/credenziali, mai in chat)"},
-    {testo:"Dominio e hosting definitivi per la pubblicazione", stato:"aperto", nota:""},
-  ];
-  const badgeFor = st => st==="confermato" ? '<span class="badge ok">Confermato</span>'
-    : st==="parziale" ? '<span class="badge warn">Parziale</span>'
-    : st==="provvisorio" ? '<span class="badge warn">Provvisorio</span>'
-    : '<span class="badge muted">Da confermare</span>';
-  return `<h2 class="section-title">Dati da confermare prima dello sviluppo definitivo</h2>
-  ${items.map(i=>`<div class="card">
-    <div class="appt-row"><strong>${i.testo}</strong>${badgeFor(i.stato)}</div>
-    ${i.nota ? `<div class="appt-meta" style="margin-top:5px;">${esc(i.nota)}</div>` : ''}
-  </div>`).join('')}`;
-}
-
 /* ====================== HELPERS ====================== */
 function esc(s){ return (s||"").replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ====================== TESTI LEGALI ====================== */
+const TESTI_LEGALI = {
+  privacy: {
+    titolo: "Informativa sulla Privacy",
+    corpo: `
+      <h3>Titolare del trattamento</h3>
+      <p>Il Titolare del trattamento dei dati è Nima Hair & Beauty S.r.l.s., con sede in Via Roma 163, Bellizzi (SA), P.IVA e Codice Fiscale 06224290657, REA SA-506753, PEC pion@pec.it. Per qualsiasi richiesta relativa al trattamento dei tuoi dati puoi scrivere a nimahairbeautybellizzi@gmail.com.</p>
+      <h3>Dati che raccogliamo</h3>
+      <p>Attraverso questa app raccogliamo nome e cognome, numero di telefono e indirizzo email. La password di accesso non è mai visibile al salone: è gestita in modo sicuro dal fornitore del servizio di autenticazione (Google Firebase). Raccogliamo inoltre lo storico degli appuntamenti prenotati (servizio, data, operatrice, importo), i punti del programma fedeltà ed eventuali note aggiunte dallo staff sull'appuntamento — nelle quali, per tua tutela, non devono comparire dati sanitari, allergie o altre informazioni sulla salute.</p>
+      <p>Non raccogliamo né conserviamo mai i dati della tua carta di pagamento: quando paghi online, il pagamento avviene su una pagina sicura gestita direttamente da SumUp, che comunica alla nostra app soltanto l'esito del pagamento e l'importo.</p>
+      <h3>Perché usiamo questi dati</h3>
+      <p>Utilizziamo i tuoi dati per gestire le prenotazioni ed eventualmente ricontattarti, gestire il programma fedeltà e adempiere agli obblighi contabili e fiscali del salone. La base giuridica è l'esecuzione del rapporto contrattuale con te (la prenotazione) e, per gli obblighi contabili, la legge.</p>
+      <h3>Dove sono conservati i dati</h3>
+      <p>I dati sono conservati su Google Firebase, su server collocati nell'Unione Europea, e sono accessibili solo allo staff e all'amministrazione del salone tramite accesso riservato. Conserviamo i tuoi dati finché mantieni un account attivo sull'app; i dati relativi ai pagamenti sono conservati per il periodo previsto dalla normativa fiscale italiana.</p>
+      <h3>Con chi condividiamo i tuoi dati</h3>
+      <p>I tuoi dati sono trattati da fornitori che agiscono come responsabili del trattamento per nostro conto: Google Firebase (database e accesso), Netlify (hosting del sito) e SumUp (pagamenti online). Non vendiamo né cediamo i tuoi dati a terzi per finalità di marketing.</p>
+      <h3>I tuoi diritti</h3>
+      <p>In qualsiasi momento puoi chiedere di accedere ai tuoi dati, farli correggere, farli cancellare, limitarne l'uso, riceverli in un formato trasferibile oppure opporti al trattamento, scrivendo a nimahairbeautybellizzi@gmail.com. Hai inoltre diritto di proporre reclamo al Garante per la protezione dei dati personali (garanteprivacy.it) se ritieni che il trattamento violi la normativa.</p>
+      <h3>Modifiche</h3>
+      <p>Questa informativa può essere aggiornata nel tempo; la versione sempre valida è quella pubblicata in questa pagina.</p>
+    `
+  },
+  cookie: {
+    titolo: "Cookie Policy",
+    corpo: `
+      <h3>Cosa sono i cookie</h3>
+      <p>I cookie sono piccoli file che un sito o un'app salvano sul tuo dispositivo per far funzionare alcune funzionalità o ricordare le tue preferenze.</p>
+      <h3>Cookie che utilizziamo</h3>
+      <p>Questa app utilizza esclusivamente cookie e tecnologie simili (come il local storage del browser) strettamente necessari al suo funzionamento, in particolare per mantenere l'accesso quando ti colleghi con email e password. Non utilizziamo cookie di profilazione, non utilizziamo strumenti di analisi statistica e non mostriamo pubblicità di alcun tipo.</p>
+      <h3>Cookie di terze parti</h3>
+      <p>Quando effettui un pagamento online vieni indirizzata alla pagina di pagamento sicura di SumUp, un sito indipendente che può utilizzare propri cookie tecnici e di sicurezza secondo la propria cookie policy, consultabile su sumup.com.</p>
+      <h3>Come gestire i cookie</h3>
+      <p>Puoi in ogni momento modificare le impostazioni del tuo browser per bloccare o cancellare i cookie; trattandosi però di cookie tecnici necessari, disabilitarli potrebbe impedirti di accedere alla tua area personale.</p>
+    `
+  },
+  termini: {
+    titolo: "Termini e Condizioni",
+    corpo: `
+      <h3>Il servizio</h3>
+      <p>Questa app permette di prenotare online i servizi di Nima Hair & Beauty S.r.l.s., Via Roma 163, Bellizzi (SA), P.IVA 06224290657.</p>
+      <h3>Prenotazioni</h3>
+      <p>Puoi prenotare i servizi disponibili scegliendo data, orario e operatrice tra quelli mostrati come liberi. I servizi indicati come "da concordare" richiedono un contatto diretto con il salone e non si prenotano online. Il salone si riserva la facoltà di modificare un appuntamento per cause organizzative eccezionali, avvisandoti quanto prima possibile.</p>
+      <h3>Pagamenti e acconto</h3>
+      <p>Per i servizi di importo superiore a 30€, al momento della prenotazione è richiesto il pagamento online di un acconto pari al 50% oppure dell'intero importo, tramite SumUp. Se il pagamento non va a buon fine al primo tentativo, puoi riprovare in qualsiasi momento dalla sezione "I miei appuntamenti". L'eventuale saldo residuo si paga direttamente in salone.</p>
+      <h3>Modifiche e cancellazioni</h3>
+      <p>Puoi annullare una prenotazione dalla sezione "I miei appuntamenti". Se l'annullamento avviene entro le 48 ore precedenti l'appuntamento, l'acconto o l'importo già versato non viene rimborsato.</p>
+      <h3>Programma fedeltà</h3>
+      <p>Ogni euro speso e interamente saldato dà diritto a un punto fedeltà, utilizzabile per i premi indicati nell'app. Il salone può aggiornare in qualsiasi momento il catalogo premi e il valore in punti dei servizi.</p>
+      <h3>Mancata presentazione</h3>
+      <p>In caso di ripetute mancate presentazioni senza preavviso, il salone si riserva la facoltà di richiedere il pagamento anticipato per le prenotazioni successive.</p>
+      <h3>Responsabilità</h3>
+      <p>Il salone presta i propri servizi secondo gli standard professionali del settore. L'app è uno strumento di prenotazione: eventuali informazioni su condizioni di salute, allergie o intolleranze vanno comunicate direttamente e verbalmente allo staff, e non vanno inserite nei campi di testo dell'app.</p>
+      <h3>Legge applicabile</h3>
+      <p>Ai presenti termini si applica la legge italiana; per ogni controversia è competente il Foro di Salerno.</p>
+      <h3>Modifiche ai termini</h3>
+      <p>Il salone può aggiornare questi termini nel tempo; la versione in vigore è sempre quella pubblicata in questa pagina.</p>
+    `
+  }
+};
+
+function renderPaginaLegale(tipo){
+  const t = TESTI_LEGALI[tipo];
+  if(!t) return `<div class="empty">Pagina non trovata.</div>`;
+  return `<div class="card pagina-legale">
+    <button class="btn ghost small" id="btn-chiudi-legale" style="margin-bottom:14px;">← Torna all'app</button>
+    <h2 class="section-title" style="margin-top:0;">${t.titolo}</h2>
+    ${t.corpo}
+  </div>`;
+}
+
+function renderFooterLinks(){
+  return `© ${new Date().getFullYear()} Nima Hair & Beauty S.r.l.s. — Via Roma 163, Bellizzi (SA) — P.IVA 06224290657
+  <div class="footer-links">
+    <button data-legale="privacy">Privacy</button><button data-legale="cookie">Cookie</button><button data-legale="termini">Termini e condizioni</button>
+  </div>`;
+}
 
 /* ====================== EVENTI ====================== */
 function attachHandlers(){
   const app = document.getElementById('app');
+
+  // --- FOOTER: pagine legali (privacy/cookie/termini) ---
+  document.querySelectorAll('[data-legale]').forEach(b=>{
+    b.addEventListener('click', ()=>{ paginaLegale = b.dataset.legale; window.scrollTo(0,0); render(); });
+  });
+  const btnChiudiLegale = document.getElementById('btn-chiudi-legale');
+  if(btnChiudiLegale) btnChiudiLegale.addEventListener('click', ()=>{ paginaLegale = null; render(); });
 
   // --- CLIENTE: autenticazione ---
   app.querySelectorAll('[data-authmode]').forEach(b=>{
@@ -1520,6 +1675,17 @@ function attachHandlers(){
   const btnConferma = document.getElementById('btn-conferma-prenota');
   if(btnConferma) btnConferma.addEventListener('click', confermaPrenotazione);
 
+  // --- CLIENTE: riprova pagamento ---
+  app.querySelectorAll('[data-riprova-pagamento]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const appt = DB.appts.find(x=>x.id===b.dataset.riprovaPagamento);
+      if(!appt || !appt.pagamento) return;
+      const servizio = getService(appt.serviceId);
+      b.disabled = true; b.textContent = "Attendere...";
+      await avviaPagamentoSumUp(appt, appt.pagamento, servizio);
+    });
+  });
+
   // --- CLIENTE: annulla ---
   app.querySelectorAll('[data-annulla]').forEach(b=>{
     b.addEventListener('click', ()=>{
@@ -1562,10 +1728,27 @@ function attachHandlers(){
   if(btnChiudiInterna) btnChiudiInterna.addEventListener('click', chiudiPrenotazioneInterna);
 
   app.querySelectorAll('.tabbar button[data-cmode]').forEach(b=>{
-    b.addEventListener('click', ()=>{ staffBooking.clienteMode = b.dataset.cmode; staffBooking.clienteId=""; staffBooking.nome=""; staffBooking.telefono=""; render(); });
+    b.addEventListener('click', ()=>{ staffBooking.clienteMode = b.dataset.cmode; staffBooking.clienteId=""; staffBooking.clienteQuery=""; staffBooking.clienteDropdownAperto=false; staffBooking.nome=""; staffBooking.telefono=""; render(); });
   });
-  const sbClienteEsistente = document.getElementById('sb-cliente-esistente');
-  if(sbClienteEsistente) sbClienteEsistente.addEventListener('change', e=>{ staffBooking.clienteId = e.target.value; });
+  const cliTrigger = document.getElementById('cli-select-trigger');
+  if(cliTrigger) cliTrigger.addEventListener('click', e=>{
+    e.stopPropagation();
+    staffBooking.clienteDropdownAperto = !staffBooking.clienteDropdownAperto;
+    render();
+  });
+  const cliSearchInput = document.getElementById('cli-search-input');
+  if(cliSearchInput) cliSearchInput.addEventListener('input', e=>{
+    staffBooking.clienteQuery = e.target.value;
+    render();
+  });
+  app.querySelectorAll('[data-scegli-cliente]').forEach(opt=>{
+    opt.addEventListener('click', ()=>{
+      staffBooking.clienteId = opt.dataset.scegliCliente;
+      staffBooking.clienteDropdownAperto = false;
+      staffBooking.clienteQuery = "";
+      render();
+    });
+  });
   const sbNome = document.getElementById('sb-nome');
   if(sbNome) sbNome.addEventListener('input', e=>{ staffBooking.nome = e.target.value; });
   const sbTelefono = document.getElementById('sb-telefono');
@@ -1737,6 +1920,35 @@ function attachHandlers(){
       if(!confirm(`Riscattare "${premio.nome}" per ${c.nome}? Verranno scalati ${premio.puntiRichiesti} punti (saldo attuale: ${c.punti||0}).`)) return;
       c.punti = (c.punti||0) - premio.puntiRichiesti;
       log(`Premio riscattato: "${premio.nome}" per ${c.nome} (-${premio.puntiRichiesti} punti, saldo residuo ${c.punti})`);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-punti-agg]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const cid = b.dataset.puntiAgg;
+      const c = DB.clients.find(x=>x.id===cid);
+      const input = app.querySelector(`[data-punti-input="${cid}"]`);
+      const n = parseInt(input && input.value, 10);
+      if(!c || !n || n<=0){ alert("Inserisci un numero di punti valido."); return; }
+      c.punti = (c.punti||0) + n;
+      log(`Punti fedeltà aggiunti manualmente: +${n} a ${c.nome} (saldo ${c.punti})`);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-punti-tog]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const cid = b.dataset.puntiTog;
+      const c = DB.clients.find(x=>x.id===cid);
+      const input = app.querySelector(`[data-punti-input="${cid}"]`);
+      const n = parseInt(input && input.value, 10);
+      if(!c || !n || n<=0){ alert("Inserisci un numero di punti valido."); return; }
+      if((c.punti||0) < n){
+        if(!confirm(`${c.nome} ha solo ${c.punti||0} punti: portare il saldo a 0?`)) return;
+        c.punti = 0;
+      } else {
+        c.punti = (c.punti||0) - n;
+      }
+      log(`Punti fedeltà rimossi manualmente: -${n} a ${c.nome} (saldo ${c.punti})`);
       saveDB(); render();
     });
   });
