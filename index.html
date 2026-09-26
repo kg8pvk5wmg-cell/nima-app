@@ -1005,6 +1005,7 @@ let proAuth = null; // {id, nome} quando autenticata
 let proLoginSel = DEFAULT_PROS[0].id;
 let proLoginErr = null;
 let apptSelezionataNota = null;
+let settimanaOffset = 0; // 0 = settimana corrente, +1 = prossima, -1 = precedente...
 
 function renderProfessionista(){
   if(!proAuth) return renderProLogin();
@@ -1066,7 +1067,12 @@ function renderProDashboard(){
 
   // RIEPILOGO SETTIMANALE — sotto, più compatto
   html += `<h2 class="section-title">Riepilogo settimanale</h2>`;
-  const giorniSettimana = getGiorniSettimanaCorrente();
+  const giorniSettimana = getGiorniSettimana(settimanaOffset);
+  html += `<div class="actions-row" style="margin-top:-6px;">
+    <button class="btn ghost small" id="btn-settimana-prev">← Settimana prima</button>
+    <button class="btn ghost small" id="btn-settimana-next">Settimana dopo →</button>
+    ${settimanaOffset!==0 ? `<button class="btn ghost small" id="btn-settimana-oggi">↺ Settimana di oggi</button>` : ''}
+  </div>`;
   html += `<div class="card">`;
   giorniSettimana.forEach(data=>{
     const appts = DB.appts.filter(a=>a.proId===proAuth.id && a.data===data && a.stato!=="Annullato");
@@ -1103,12 +1109,12 @@ function renderProDashboard(){
   return html;
 }
 
-function getGiorniSettimanaCorrente(){
+function getGiorniSettimana(offset){
   const oggiDate = new Date();
   const giornoSett = oggiDate.getDay(); // 0=Dom..6=Sab
   const diffLunedi = giornoSett===0 ? -6 : 1-giornoSett;
   const lunedi = new Date(oggiDate);
-  lunedi.setDate(oggiDate.getDate()+diffLunedi);
+  lunedi.setDate(oggiDate.getDate()+diffLunedi+(offset*7));
   const giorni = [];
   for(let i=1;i<=5;i++){ // Martedì(1) a Sabato(5), giorni di apertura del salone
     const d = new Date(lunedi);
@@ -1594,7 +1600,7 @@ const TESTI_LEGALI = {
     titolo: "Informativa sulla Privacy",
     corpo: `
       <h3>Titolare del trattamento</h3>
-      <p>Il Titolare del trattamento dei dati è Nima Hair & Beauty S.r.l.s., con sede in Via Roma 163, Bellizzi (SA), P.IVA e Codice Fiscale 06224290657, REA SA-506753, PEC pion@pec.it. Per qualsiasi richiesta relativa al trattamento dei tuoi dati puoi scrivere a nimahairbeautybellizzi@gmail.com.</p>
+      <p>Il Titolare del trattamento dei dati è Pionico Group S.r.l.s., con sede in Via Roma 163, Bellizzi (SA), P.IVA e Codice Fiscale 06224290657, REA SA-506753, PEC pion@pec.it. Per qualsiasi richiesta relativa al trattamento dei tuoi dati puoi scrivere a nimahairbeautybellizzi@gmail.com.</p>
       <h3>Dati che raccogliamo</h3>
       <p>Attraverso questa app raccogliamo nome e cognome, numero di telefono e indirizzo email. La password di accesso non è mai visibile al salone: è gestita in modo sicuro dal fornitore del servizio di autenticazione (Google Firebase). Raccogliamo inoltre lo storico degli appuntamenti prenotati (servizio, data, operatrice, importo), i punti del programma fedeltà ed eventuali note aggiunte dallo staff sull'appuntamento — nelle quali, per tua tutela, non devono comparire dati sanitari, allergie o altre informazioni sulla salute.</p>
       <p>Non raccogliamo né conserviamo mai i dati della tua carta di pagamento: quando paghi online, il pagamento avviene su una pagina sicura gestita direttamente da SumUp, che comunica alla nostra app soltanto l'esito del pagamento e l'importo.</p>
@@ -1627,7 +1633,7 @@ const TESTI_LEGALI = {
     titolo: "Termini e Condizioni",
     corpo: `
       <h3>Il servizio</h3>
-      <p>Questa app permette di prenotare online i servizi di Nima Hair & Beauty S.r.l.s., Via Roma 163, Bellizzi (SA), P.IVA 06224290657.</p>
+      <p>Questa app permette di prenotare online i servizi di Nima Hair & Beauty, gestito da Pionico Group S.r.l.s., Via Roma 163, Bellizzi (SA), P.IVA 06224290657.</p>
       <h3>Prenotazioni</h3>
       <p>Puoi prenotare i servizi disponibili scegliendo data, orario e operatrice tra quelli mostrati come liberi. I servizi indicati come "da concordare" richiedono un contatto diretto con il salone e non si prenotano online. Il salone si riserva la facoltà di modificare un appuntamento per cause organizzative eccezionali, avvisandoti quanto prima possibile.</p>
       <h3>Pagamenti e acconto</h3>
@@ -1659,7 +1665,7 @@ function renderPaginaLegale(tipo){
 }
 
 function renderFooterLinks(){
-  return `© ${new Date().getFullYear()} Nima Hair & Beauty S.r.l.s. — Via Roma 163, Bellizzi (SA) — P.IVA 06224290657
+  return `© ${new Date().getFullYear()} Nima Hair & Beauty (Pionico Group S.r.l.s.) — Via Roma 163, Bellizzi (SA) — P.IVA 06224290657
   <div class="footer-links">
     <button data-legale="privacy">Privacy</button><button data-legale="cookie">Cookie</button><button data-legale="termini">Termini e condizioni</button>
   </div>`;
@@ -1863,7 +1869,15 @@ function attachHandlers(){
     render();
   });
   const btnProLogout = document.getElementById('btn-pro-logout');
-  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; render(); });
+  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; settimanaOffset = 0; render(); });
+
+  // --- STAFF: navigazione settimane riepilogo ---
+  const btnSettimanaPrev = document.getElementById('btn-settimana-prev');
+  if(btnSettimanaPrev) btnSettimanaPrev.addEventListener('click', ()=>{ settimanaOffset--; render(); });
+  const btnSettimanaNext = document.getElementById('btn-settimana-next');
+  if(btnSettimanaNext) btnSettimanaNext.addEventListener('click', ()=>{ settimanaOffset++; render(); });
+  const btnSettimanaOggi = document.getElementById('btn-settimana-oggi');
+  if(btnSettimanaOggi) btnSettimanaOggi.addEventListener('click', ()=>{ settimanaOffset=0; render(); });
 
   // --- SPESA: aggiungi (staff) e elimina (staff + admin) ---
   const btnSpesaAggiungi = document.getElementById('btn-spesa-aggiungi');
