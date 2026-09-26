@@ -1229,8 +1229,10 @@ function attachHandlers(){
       const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO()};
       DB.clients.push(nuovoCliente);
       log(`Nuova cliente registrata: ${nome}`);
-      saveDB();
+      clienteAuth = {uid:cred.user.uid, email:cred.user.email};
       clienteAuthErr = null;
+      saveDB();
+      render();
     }).catch(err=>{
       clienteAuthErr = traduciErroreAuth(err.code);
       render();
@@ -1241,8 +1243,10 @@ function attachHandlers(){
     const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
     if(!email || !password){ clienteAuthErr = "Inserisci email e password."; render(); return; }
-    firebaseAuth.signInWithEmailAndPassword(email, password).then(()=>{
+    firebaseAuth.signInWithEmailAndPassword(email, password).then(cred=>{
+      clienteAuth = {uid:cred.user.uid, email:cred.user.email};
       clienteAuthErr = null;
+      render();
     }).catch(err=>{
       clienteAuthErr = traduciErroreAuth(err.code);
       render();
