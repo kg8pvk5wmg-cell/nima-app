@@ -564,7 +564,17 @@ function fmtData(d){
   const dt = new Date(d+"T00:00:00");
   return dt.toLocaleDateString('it-IT', {weekday:'short', day:'2-digit', month:'short'});
 }
-function oggiISO(){ return new Date().toISOString().slice(0,10); }
+function dataLocaleISO(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const g = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${g}`;
+}
+function oggiISO(){ return dataLocaleISO(new Date()); }
+function adessoLocaleISO(){
+  const d = new Date();
+  return dataLocaleISO(d) + "T" + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
 function adessoISO(){ return new Date().toISOString(); }
 
 function getService(id){ return DB.services.find(s=>s.id===id); }
@@ -934,7 +944,7 @@ function renderStoricoCliente(){
   let html = `<h2 class="section-title">I tuoi appuntamenti</h2>`;
   miei.forEach(a=>{
     const s = getService(a.serviceId); const p = getPro(a.proId);
-    const futuro = (a.data+"T"+a.ora) >= new Date().toISOString().slice(0,16);
+    const futuro = (a.data+"T"+a.ora) >= adessoLocaleISO();
     const oreAllAppuntamento = (new Date(a.data+"T"+a.ora+":00") - new Date()) / (1000*60*60);
     const entro48 = oreAllAppuntamento >= 48;
     const pagamentoDaCompletare = a.pagamento && (a.pagamento.stato==="in_attesa" || a.pagamento.stato==="fallito") && !a.pagatoManuale && a.stato!=="Annullato";
@@ -1125,7 +1135,7 @@ function getGiorniSettimana(offset){
   for(let i=1;i<=5;i++){ // Martedì(1) a Sabato(5), giorni di apertura del salone
     const d = new Date(lunedi);
     d.setDate(lunedi.getDate()+i);
-    giorni.push(d.toISOString().slice(0,10));
+    giorni.push(dataLocaleISO(d));
   }
   return giorni;
 }
