@@ -4,6 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nima Hair & Beauty</title>
+<meta property="og:title" content="Nima Hair & Beauty">
+<meta property="og:description" content="Prenota online il tuo appuntamento: parrucchiera, onicotecnica, estetista e make-up a Bellizzi (SA).">
+<meta property="og:image" content="https://nimahairbeauty.netlify.app/logo-nima.jpg">
+<meta property="og:image:width" content="300">
+<meta property="og:image:height" content="300">
+<meta property="og:url" content="https://nimahairbeauty.netlify.app">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Nima Hair & Beauty">
+<meta name="twitter:description" content="Prenota online il tuo appuntamento: parrucchiera, onicotecnica, estetista e make-up a Bellizzi (SA).">
+<meta name="twitter:image" content="https://nimahairbeauty.netlify.app/logo-nima.jpg">
+<link rel="icon" type="image/jpeg" href="logo-nima.jpg">
+<link rel="apple-touch-icon" href="logo-nima.jpg">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Nima">
+<meta name="theme-color" content="#d61f7a">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,500;0,600;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -160,6 +178,40 @@ table.simple th{color:var(--muted);font-weight:600;font-size:11px;text-transform
 }
 .pill:hover{border-color:var(--pink);}
 .pill.selected{background:var(--pink);color:#fff;border-color:var(--pink);}
+
+.svc-select{position:relative;}
+.svc-select-trigger{
+  width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);display:flex;align-items:center;justify-content:space-between;gap:10px;
+  cursor:pointer;transition:border-color 0.15s, box-shadow 0.15s;
+}
+.svc-select-trigger:hover{border-color:var(--pink);}
+.svc-select.open .svc-select-trigger{border-color:var(--pink);box-shadow:0 0 0 3px var(--pink-soft);}
+.svc-select-trigger .placeholder{color:var(--muted);font-size:14.5px;}
+.svc-select-trigger .chosen{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.svc-select-trigger .chosen .nome{font-family:'Fraunces',Georgia,serif;font-size:15.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.svc-select-trigger .chosen .dettagli{font-size:12px;color:var(--pink-deep);}
+.svc-select-trigger .chev{flex-shrink:0;color:var(--pink);transition:transform 0.2s ease;}
+.svc-select.open .svc-select-trigger .chev{transform:rotate(180deg);}
+.svc-panel{
+  position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:30;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--shadow-float);max-height:320px;overflow-y:auto;padding:6px;
+  animation:svcPanelIn 0.12s ease-out;
+}
+@keyframes svcPanelIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.svc-cat-label{
+  font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:12.5px;color:var(--pink-deep);
+  padding:10px 10px 5px;
+}
+.svc-opt{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 10px;border-radius:var(--r-sm);cursor:pointer;transition:background 0.12s;
+}
+.svc-opt:hover{background:var(--pink-soft);}
+.svc-opt.selected{background:var(--pink-soft);}
+.svc-opt .nome{font-size:14.5px;color:var(--ink);}
+.svc-opt .prezzo{font-size:12.5px;color:var(--pink-deep);font-weight:600;white-space:nowrap;flex-shrink:0;}
 
 .log-line{font-size:12px;color:var(--muted);padding:6px 0;border-bottom:1px dashed var(--line);}
 
@@ -336,6 +388,15 @@ const DEFAULT_PROS = [
   {id:"p4", nome:"Maria", aree:["Make-up"], pin:"1234"},
 ];
 
+const PUNTI_PER_EURO = 1; // punti fedeltà guadagnati per ogni euro speso — provvisorio, da confermare
+// Premi confermati dal salone
+const DEFAULT_PREMI = [
+  {id:"pr1", nome:"Sconto 5€ sul prossimo servizio", puntiRichiesti:75},
+  {id:"pr2", nome:"Sconto 10€ sul prossimo servizio", puntiRichiesti:150},
+  {id:"pr3", nome:"Sconto 20€ sul prossimo servizio", puntiRichiesti:280},
+  {id:"pr4", nome:"Sconto 50€ sul prossimo servizio", puntiRichiesti:600},
+];
+
 const ORARI = {
   // 0=Dom 1=Lun 2=Mar 3=Mer 4=Gio 5=Ven 6=Sab
   2:[["09:00","13:00"],["15:00","19:00"]],
@@ -385,10 +446,11 @@ function defaultDB(){
     services: DEFAULT_SERVICES,
     pros: DEFAULT_PROS,
     appts: [],
-    clients: [], // {id, nome, telefono, note:[{id,proId,testo,data}]}
+    clients: [], // {id, nome, telefono, note:[{id,proId,testo,data}], punti}
     logs: [],
     proNotify: {}, // {proId: {modifiche:true, annullamenti:true, nuove:true}}
-    adminPassword: "nima2024"
+    adminPassword: "nima2024",
+    premi: DEFAULT_PREMI
   };
 }
 
@@ -408,6 +470,7 @@ function loadDB(){
   docRef.onSnapshot(snap=>{
     if(snap.exists){
       DB = snap.data();
+      if(!DB.premi) DB.premi = DEFAULT_PREMI; // documenti creati prima dei premi fedeltà
       logDebug('Firestore: dati ricevuti, clienti nel documento=' + (DB.clients?DB.clients.length:'n/d'));
     } else {
       DB = defaultDB();
@@ -517,7 +580,7 @@ function aggiornaStatiAutomatici(){
   });
 }
 
-function calcolaAcconto(prezzo){ return Math.round(prezzo*0.30*100)/100; }
+function calcolaAcconto(prezzo){ return Math.round(prezzo*0.50*100)/100; }
 
 /* ====================== RENDER PRINCIPALE ====================== */
 function render(){
@@ -559,8 +622,18 @@ document.getElementById('roleNav').addEventListener('click', (e)=>{
   render();
 });
 
+document.addEventListener('click', (e)=>{
+  if(!servizioDropdownAperto) return;
+  const box = document.getElementById('svc-select');
+  if(box && !box.contains(e.target)){
+    servizioDropdownAperto = false;
+    render();
+  }
+});
+
 /* ====================== AREA CLIENTE ====================== */
 let bookingState = {area:null, serviceId:null, proId:null, data:null, ora:null};
+let servizioDropdownAperto = false;
 let clienteAuth = null; // {uid, email} quando la cliente ha fatto login
 let clienteRecord = null; // record collegato in DB.clients
 let clienteRecordFallback = null; // copia locale del profilo appena creato, usata se il database condiviso non lo trova subito
@@ -609,15 +682,36 @@ function renderCliente(){
     <div class="appt-meta" style="margin-top:0;">Accesso come <strong>${esc(clienteRecord.nome)}</strong></div>
     <button class="btn ghost small" id="btn-cliente-logout">Esci</button>
   </div>`;
+  html += `<div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;margin-bottom:12px;">
+    <div><div style="font-size:12px;color:var(--muted);">I tuoi punti fedeltà</div><div class="display" style="font-size:22px;color:var(--pink-deep);">${clienteRecord.punti||0} ⭐</div></div>
+    <button class="btn ghost small" data-tab="premi">Vedi i premi</button>
+  </div>`;
 
   html += `<div class="tabbar">
     <button data-tab="prenota" class="${vistaClienteTab==='prenota'?'active':''}">Prenota</button>
     <button data-tab="storico" class="${vistaClienteTab==='storico'?'active':''}">I miei appuntamenti</button>
+    <button data-tab="premi" class="${vistaClienteTab==='premi'?'active':''}">Premi</button>
   </div>`;
 
   if(vistaClienteTab==="prenota") html += renderPrenotazione();
+  else if(vistaClienteTab==="premi") html += renderPremiCliente();
   else html += renderStoricoCliente();
 
+  return html;
+}
+
+function renderPremiCliente(){
+  const punti = clienteRecord.punti||0;
+  const premi = (DB.premi||DEFAULT_PREMI).slice().sort((a,b)=>a.puntiRichiesti-b.puntiRichiesti);
+  let html = `<h2 class="section-title">Catalogo premi</h2>
+  <div class="appt-meta" style="margin-bottom:12px;">Guadagni ${PUNTI_PER_EURO} punto/i per ogni euro speso tramite l'app. Per riscattare un premio, mostra questa pagina in salone.</div>`;
+  premi.forEach(p=>{
+    const ok = punti >= p.puntiRichiesti;
+    html += `<div class="appt-row" style="padding:12px 14px;border:1.5px solid ${ok?'var(--pink)':'var(--line)'};border-radius:var(--r-md);margin-bottom:8px;${ok?'background:var(--pink-soft);':'opacity:0.65;'}">
+      <div>${p.nome}</div>
+      <strong style="color:var(--pink-deep);white-space:nowrap;">${p.puntiRichiesti} pt</strong>
+    </div>`;
+  });
   return html;
 }
 
@@ -676,12 +770,23 @@ function renderPrenotazione(){
     }
     const servizi = DB.services.filter(s=>s.area===bookingState.area);
     const categorie = [...new Set(servizi.map(s=>s.categoria||bookingState.area))];
-    html += `<div class="field"><label>Servizio</label><select id="sel-servizio">
-      <option value="">Seleziona un servizio</option>
-      ${categorie.map(cat=>`<optgroup label="${cat}">${servizi.filter(s=>(s.categoria||bookingState.area)===cat).map(s=>
-        `<option value="${s.id}" ${bookingState.serviceId===s.id?'selected':''}>${s.name} — ${describePrezzoServizio(s)}</option>`
-      ).join('')}</optgroup>`).join('')}
-    </select></div>`;
+    const servizioCorrente = bookingState.serviceId ? servizi.find(s=>s.id===bookingState.serviceId) : null;
+    html += `<div class="field"><label>Servizio</label>
+      <div class="svc-select ${servizioDropdownAperto?'open':''}" id="svc-select">
+        <div class="svc-select-trigger" id="svc-select-trigger">
+          ${servizioCorrente
+            ? `<div class="chosen"><div class="nome">${servizioCorrente.name}</div><div class="dettagli">${describePrezzoServizio(servizioCorrente)}</div></div>`
+            : `<span class="placeholder">Seleziona un servizio</span>`}
+          <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        ${servizioDropdownAperto ? `<div class="svc-panel">
+          ${categorie.map(cat=>`<div class="svc-cat-label">${cat}</div>${servizi.filter(s=>(s.categoria||bookingState.area)===cat).map(s=>
+            `<div class="svc-opt ${bookingState.serviceId===s.id?'selected':''}" data-scegli-servizio="${s.id}">
+              <span class="nome">${s.name}</span><span class="prezzo">${describePrezzoServizio(s)}</span>
+            </div>`).join('')}`).join('')}
+        </div>` : ''}
+      </div>
+    </div>`;
   }
 
   const servizioSel = bookingState.serviceId ? getService(bookingState.serviceId) : null;
@@ -723,7 +828,7 @@ function renderPrenotazione(){
 
   if(bookingState.ora && bookingState.data && servizioSel){
     if(servizioSel.prezzo > 30){
-      html += `<div class="warn-box">Servizio oltre €30: alla conferma dovrai scegliere se pagare l'intero importo online oppure un acconto obbligatorio del 30% (€${calcolaAcconto(servizioSel.prezzo)}).</div>`;
+      html += `<div class="warn-box">Servizio oltre €30: alla conferma dovrai scegliere tra un acconto del 50% (€${calcolaAcconto(servizioSel.prezzo)}) oppure il saldo intero subito (€${servizioSel.prezzo}).</div>`;
     }
     html += `<div class="actions-row"><button class="btn" id="btn-conferma-prenota">Continua e conferma</button></div>`;
   }
@@ -772,12 +877,44 @@ function badgeClass(stato){
   return "";
 }
 function describePagamento(a){
-  if(!a.pagamento) return "da incassare in negozio";
-  if(a.pagamento.stato==="in_attesa") return `pagamento online in sospeso (€${a.pagamento.importo})`;
-  if(a.pagamento.stato==="fallito") return `pagamento online non riuscito (€${a.pagamento.importo}) — da regolare in negozio`;
-  if(a.pagamento.tipo==="online") return `incassato${a.pagamento.metodo?` — ${a.pagamento.metodo}`:a.pagamento.stato==="confermato"?" — SumUp online":''} (€${a.pagamento.importo})`;
-  if(a.pagamento.tipo==="acconto") return `acconto €${a.pagamento.importo} incassato${a.pagamento.metodo?` — ${a.pagamento.metodo}`:a.pagamento.stato==="confermato"?" — SumUp online":''}, saldo in negozio`;
-  return "in negozio";
+  if(a.pagamento && a.pagamento.tipo==="online" && a.pagamento.stato==="confermato"){
+    return `incassato${a.pagamento.metodo?` — ${a.pagamento.metodo}`:' — SumUp online'} (€${a.pagamento.importo})`;
+  }
+  if(a.pagamento && a.pagamento.tipo==="acconto" && a.pagamento.stato==="confermato"){
+    return `acconto €${a.pagamento.importo} incassato${a.pagamento.metodo?` — ${a.pagamento.metodo}`:' — SumUp online'} — saldo ${a.pagatoManuale?'pagato in negozio':'da pagare in negozio'}`;
+  }
+  if(a.pagamento && a.pagamento.stato==="fallito"){
+    return a.pagatoManuale ? "pagato in negozio (il pagamento online non era andato a buon fine)" : "pagamento online non riuscito — da incassare in negozio";
+  }
+  if(a.pagamento && a.pagamento.stato==="in_attesa"){
+    return a.pagatoManuale ? "pagato in negozio (pagamento online mai completato)" : "pagamento online in sospeso";
+  }
+  return a.pagatoManuale ? "pagato in negozio" : "non pagato";
+}
+function serveConfermaManuale(a){
+  return !(a.pagamento && a.pagamento.tipo==="online" && a.pagamento.stato==="confermato");
+}
+
+function apptCompletamentePagato(a){
+  if(a.pagamento && a.pagamento.tipo==="online" && a.pagamento.stato==="confermato") return true;
+  if(a.pagamento && a.pagamento.tipo==="acconto" && a.pagamento.stato==="confermato") return !!a.pagatoManuale;
+  return !!a.pagatoManuale; // nessun pagamento online, oppure fallito/in sospeso ma confermato a mano
+}
+
+function sincronizzaPuntiFedelta(a){
+  const cliente = DB.clients.find(c=>c.id===a.clienteId);
+  const s = getService(a.serviceId);
+  if(!cliente || !s) return;
+  const completo = apptCompletamentePagato(a);
+  const punti = Math.floor(s.prezzo * PUNTI_PER_EURO);
+  if(completo && !a.puntiAssegnati){
+    cliente.punti = (cliente.punti||0) + punti;
+    a.puntiAssegnati = true;
+    if(punti>0) log(`+${punti} punti fedeltà a ${cliente.nome} (${s.name} del ${a.data})`);
+  } else if(!completo && a.puntiAssegnati){
+    cliente.punti = Math.max(0, (cliente.punti||0) - punti);
+    a.puntiAssegnati = false;
+  }
 }
 
 /* ====================== AREA PROFESSIONISTA ====================== */
@@ -832,10 +969,12 @@ function renderProDashboard(){
           <div><strong style="font-size:15.5px;">${a.ora} · ${c?c.nome:'Cliente'}</strong><div class="appt-meta">${s?s.name:''}${s?` · ${s.durata} min`:''}</div></div>
           <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
         </div>
+        <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
         <div class="actions-row">
           <button class="btn ghost small" data-stato="${a.id}|No-show">Segna assente</button>
           <button class="btn ghost small" data-stato="${a.id}|Annullato">Annulla</button>
           <button class="btn small" data-nota="${a.id}">${apptSelezionataNota===a.id?'Chiudi nota':'Aggiungi nota'}</button>
+          ${serveConfermaManuale(a) ? `<button class="btn ghost small" data-toggle-pagato="${a.id}">${a.pagatoManuale?'Segna come non pagato':'Segna come pagato'}</button>` : ''}
         </div>
         ${apptSelezionataNota===a.id ? renderFormNota(a) : ''}
       </div>`;
@@ -993,8 +1132,8 @@ function renderPrenotazioneInterna(){
       <option value="online_sumup" ${sb.pagamentoScelta==='online_sumup'?'selected':''}>Incassato subito — SumUp (POS in negozio)</option>
       <option value="online_contanti" ${sb.pagamentoScelta==='online_contanti'?'selected':''}>Incassato subito — Contanti</option>
       ${servizioSel.prezzo>30 ? `
-      <option value="acconto_sumup" ${sb.pagamentoScelta==='acconto_sumup'?'selected':''}>Acconto 30% — SumUp (POS in negozio)</option>
-      <option value="acconto_contanti" ${sb.pagamentoScelta==='acconto_contanti'?'selected':''}>Acconto 30% — Contanti</option>` : ''}
+      <option value="acconto_sumup" ${sb.pagamentoScelta==='acconto_sumup'?'selected':''}>Acconto 50% — SumUp (POS in negozio)</option>
+      <option value="acconto_contanti" ${sb.pagamentoScelta==='acconto_contanti'?'selected':''}>Acconto 50% — Contanti</option>` : ''}
     </select></div>
     <div class="actions-row"><button class="btn" id="btn-conferma-prenot-interna">Salva appuntamento</button></div>`;
   }
@@ -1032,7 +1171,7 @@ function confermaPrenotazioneInterna(){
   };
   if(sb.pagamentoScelta!=="negozio"){
     const m = metodoMap[sb.pagamentoScelta];
-    pagamento = {tipo:m.tipo, metodo:m.metodo, importo: m.tipo==="acconto" ? calcolaAcconto(servizio.prezzo) : servizio.prezzo};
+    pagamento = {tipo:m.tipo, metodo:m.metodo, importo: m.tipo==="acconto" ? calcolaAcconto(servizio.prezzo) : servizio.prezzo, stato:"confermato"};
   }
 
   const appt = {
@@ -1041,6 +1180,7 @@ function confermaPrenotazioneInterna(){
     inseritoDaStaff: true
   };
   DB.appts.push(appt);
+  sincronizzaPuntiFedelta(appt);
   const cliente = DB.clients.find(c=>c.id===clienteId);
   log(`Appuntamento inserito dallo staff: ${cliente.nome} — ${servizio.name} il ${appt.data} ${appt.ora} con ${getPro(sb.proId).nome}`);
   saveDB();
@@ -1110,6 +1250,8 @@ function renderAdminAgenda(){
         <select data-cambia-stato="${a.id}" class="sans" style="width:auto;padding:5px 8px;font-size:12px;">
           ${["Confermato","Completato","Annullato","No-show"].map(st=>`<option value="${st}" ${a.stato===st?'selected':''}>${st}</option>`).join('')}
         </select>
+        ${serveConfermaManuale(a) ? `<button class="btn ghost small" data-toggle-pagato="${a.id}">${a.pagatoManuale?'Segna come non pagato':'Segna come pagato'}</button>` : ''}
+        <button class="btn ghost small danger" data-elimina-appt="${a.id}">Elimina</button>
       </div>
     </div>`;
   });
@@ -1128,9 +1270,10 @@ function renderAdminClienti(){
       const diffMesi = (oggi - new Date(ultima.data)) / (1000*60*60*24*30);
       inattiva = diffMesi > 6;
     }
+    const premiOk = (DB.premi||DEFAULT_PREMI).filter(p=>(c.punti||0) >= p.puntiRichiesti).sort((a,b)=>a.puntiRichiesti-b.puntiRichiesti);
     html += `<div class="card">
       <div class="appt-row">
-        <div><strong>${esc(c.nome)}</strong><div class="appt-meta">${esc(c.telefono)}${c.email?' · '+esc(c.email):''} · ${storicoCompleto.length} appuntamenti</div></div>
+        <div><strong>${esc(c.nome)}</strong><div class="appt-meta">${esc(c.telefono)}${c.email?' · '+esc(c.email):''} · ${storicoCompleto.length} appuntamenti · ${c.punti||0} punti fedeltà</div></div>
         ${inattiva? '<span class="badge muted">Inattiva</span>':''}
       </div>
       <div class="actions-row">
@@ -1138,6 +1281,12 @@ function renderAdminClienti(){
         <button class="btn ghost small" data-export="${c.id}|cliente">Esporta PDF cliente</button>
         <button class="btn ghost small danger" data-elimina-cliente="${c.id}">Elimina cliente</button>
       </div>
+      ${premiOk.length>0 ? `<div class="actions-row" style="margin-top:8px;">
+        <select data-riscatta-select="${c.id}" class="sans" style="width:auto;padding:5px 8px;font-size:12px;">
+          ${premiOk.map(p=>`<option value="${p.id}">${p.nome} (${p.puntiRichiesti} pt)</option>`).join('')}
+        </select>
+        <button class="btn ghost small" data-riscatta-btn="${c.id}">Riscatta premio</button>
+      </div>` : ''}
     </div>`;
   });
   return html;
@@ -1313,7 +1462,7 @@ function attachHandlers(){
   if(btnClienteLogoutStuck) btnClienteLogoutStuck.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
 
   // --- CLIENTE: tab ---
-  app.querySelectorAll('.tabbar button[data-tab]').forEach(b=>{
+  app.querySelectorAll('[data-tab]').forEach(b=>{
     b.addEventListener('click', ()=>{ vistaClienteTab = b.dataset.tab; render(); });
   });
 
@@ -1322,14 +1471,23 @@ function attachHandlers(){
   if(pillArea) pillArea.querySelectorAll('.pill').forEach(p=>{
     p.addEventListener('click', ()=>{
       bookingState = {area:p.dataset.area, serviceId:null, proId:null, data:null, ora:null};
+      servizioDropdownAperto = false;
       render();
     });
   });
-  const selServizio = document.getElementById('sel-servizio');
-  if(selServizio) selServizio.addEventListener('change', e=>{
-    bookingState.serviceId = e.target.value || null;
-    bookingState.data = null; bookingState.ora = null;
+  const svcTrigger = document.getElementById('svc-select-trigger');
+  if(svcTrigger) svcTrigger.addEventListener('click', e=>{
+    e.stopPropagation();
+    servizioDropdownAperto = !servizioDropdownAperto;
     render();
+  });
+  app.querySelectorAll('[data-scegli-servizio]').forEach(opt=>{
+    opt.addEventListener('click', ()=>{
+      bookingState.serviceId = opt.dataset.scegliServizio;
+      bookingState.data = null; bookingState.ora = null;
+      servizioDropdownAperto = false;
+      render();
+    });
   });
   const selPro = document.getElementById('sel-pro');
   if(selPro) selPro.addEventListener('change', e=>{
@@ -1339,7 +1497,16 @@ function attachHandlers(){
   });
   const selData = document.getElementById('sel-data');
   if(selData) selData.addEventListener('change', e=>{
-    bookingState.data = e.target.value || null;
+    const val = e.target.value;
+    if(val){
+      const giorno = new Date(val+"T00:00:00").getDay();
+      if(giorno===0 || giorno===1){
+        alert("Il salone è chiuso la domenica e il lunedì. Scegli un giorno da martedì a sabato.");
+        e.target.value = bookingState.data || '';
+        return;
+      }
+    }
+    bookingState.data = val || null;
     bookingState.ora = null;
     render();
   });
@@ -1528,6 +1695,28 @@ function attachHandlers(){
       if(a){ const vecchio=a.stato; a.stato = e.target.value; log(`Admin ha cambiato stato da "${vecchio}" a "${a.stato}" (appuntamento ${a.data} ${a.ora})`); saveDB(); render(); }
     });
   });
+  app.querySelectorAll('[data-toggle-pagato]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const a = DB.appts.find(x=>x.id===b.dataset.togglePagato);
+      if(!a) return;
+      a.pagatoManuale = !a.pagatoManuale;
+      sincronizzaPuntiFedelta(a);
+      const c = DB.clients.find(x=>x.id===a.clienteId);
+      log(`${a.pagatoManuale?'Segnato come pagato':'Segnato come non pagato'} l'appuntamento di ${c?c.nome:'cliente'} del ${a.data} ${a.ora}`);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-elimina-appt]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const a = DB.appts.find(x=>x.id===b.dataset.eliminaAppt);
+      if(!a) return;
+      const s = getService(a.serviceId); const c = DB.clients.find(x=>x.id===a.clienteId);
+      if(!confirm(`Eliminare definitivamente l'appuntamento di ${c?c.nome:'cliente'} (${fmtData(a.data)} ${a.ora}${s?', '+s.name:''})? L'appuntamento sparirà del tutto, anche dallo storico. Questa azione non si può annullare.`)) return;
+      DB.appts = DB.appts.filter(x=>x.id!==a.id);
+      log(`Admin ha eliminato definitivamente l'appuntamento di ${c?c.nome:'cliente'} del ${a.data} ${a.ora}`);
+      saveDB(); render();
+    });
+  });
   app.querySelectorAll('[data-export]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const [cid, tipo] = b.dataset.export.split('|');
@@ -1535,6 +1724,20 @@ function attachHandlers(){
       log(`Esportato PDF ${tipo} per ${c.nome} (${new Date().toLocaleString('it-IT')})`);
       saveDB(); render();
       alert(`Esportazione "${tipo}" registrata nel log amministrativo per ${c.nome}.\nLa generazione del file PDF scaricabile non è ancora collegata: per ora usa questi dati manualmente, verrà aggiunta in un aggiornamento successivo.`);
+    });
+  });
+  app.querySelectorAll('[data-riscatta-btn]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const cid = b.dataset.riscattaBtn;
+      const c = DB.clients.find(x=>x.id===cid);
+      const sel = app.querySelector(`[data-riscatta-select="${cid}"]`);
+      const premio = (DB.premi||DEFAULT_PREMI).find(p=>p.id===(sel&&sel.value));
+      if(!c || !premio) return;
+      if((c.punti||0) < premio.puntiRichiesti){ alert("Punti insufficienti per questo premio."); return; }
+      if(!confirm(`Riscattare "${premio.nome}" per ${c.nome}? Verranno scalati ${premio.puntiRichiesti} punti (saldo attuale: ${c.punti||0}).`)) return;
+      c.punti = (c.punti||0) - premio.puntiRichiesti;
+      log(`Premio riscattato: "${premio.nome}" per ${c.nome} (-${premio.puntiRichiesti} punti, saldo residuo ${c.punti})`);
+      saveDB(); render();
     });
   });
   app.querySelectorAll('[data-elimina-cliente]').forEach(b=>{
@@ -1579,9 +1782,9 @@ async function confermaPrenotazione(){
 
   let pagamento = null;
   if(servizio.prezzo > 30){
-    const scelta = prompt(`Servizio superiore a €30. Scrivi "online" per pagare l'intero importo (€${servizio.prezzo}) oppure "acconto" per versare il 30% (€${calcolaAcconto(servizio.prezzo)}):`, "acconto");
-    if(scelta==="online") pagamento = {tipo:"online", importo:servizio.prezzo, stato:"in_attesa"};
-    else if(scelta==="acconto") pagamento = {tipo:"acconto", importo:calcolaAcconto(servizio.prezzo), stato:"in_attesa"};
+    const scelta = prompt(`Servizio superiore a €30. Scrivi "50" per versare un acconto del 50% (€${calcolaAcconto(servizio.prezzo)}) oppure "saldo" per pagare subito l'intero importo (€${servizio.prezzo}):`, "50");
+    if(scelta==="saldo") pagamento = {tipo:"online", importo:servizio.prezzo, stato:"in_attesa"};
+    else if(scelta==="50") pagamento = {tipo:"acconto", importo:calcolaAcconto(servizio.prezzo), stato:"in_attesa"};
     else { alert("Devi scegliere una modalità di pagamento per confermare."); return; }
   }
 
@@ -1649,6 +1852,7 @@ async function verificaPagamentoDiRitorno(apptId){
     const data = await resp.json();
     if(data.status === "PAID"){
       appt.pagamento.stato = "confermato";
+      sincronizzaPuntiFedelta(appt);
       log(`Pagamento SumUp confermato per appuntamento ${appt.data} ${appt.ora}`);
       alert("Pagamento ricevuto, grazie! La tua prenotazione è confermata.");
     } else if(data.status === "FAILED" || data.status === "EXPIRED"){
