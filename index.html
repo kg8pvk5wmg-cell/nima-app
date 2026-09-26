@@ -498,7 +498,9 @@ function defaultDB(){
     logs: [],
     proNotify: {}, // {proId: {modifiche:true, annullamenti:true, nuove:true}}
     adminPassword: "nima2024",
-    premi: DEFAULT_PREMI
+    premi: DEFAULT_PREMI,
+    magazzino: [], // {id, nome, categoria, prezzo, quantita, scorta}
+    spesa: [] // {id, testo, richiestoDa, data}
   };
 }
 
@@ -519,6 +521,8 @@ function loadDB(){
     if(snap.exists){
       DB = snap.data();
       if(!DB.premi) DB.premi = DEFAULT_PREMI; // documenti creati prima dei premi fedeltà
+      if(!DB.magazzino) DB.magazzino = []; // documenti creati prima del magazzino
+      if(!DB.spesa) DB.spesa = []; // documenti creati prima della lista della spesa
       logDebug('Firestore: dati ricevuti, clienti nel documento=' + (DB.clients?DB.clients.length:'n/d'));
     } else {
       DB = defaultDB();
@@ -567,7 +571,7 @@ function getService(id){ return DB.services.find(s=>s.id===id); }
 function getPro(id){ return DB.pros.find(p=>p.id===id); }
 
 function findOrCreateClient(nome, telefono){
-  let c = DB.clients.find(c=>c.telefono===telefono);
+  let c = telefono ? DB.clients.find(c=>c.telefono===telefono) : null;
   if(!c){
     c = {id:uid("c"), nome, telefono, note:[], creato:adessoISO()};
     DB.clients.push(c);
@@ -582,8 +586,13 @@ function orarioDisponibile(dataISO){
   return ORARI[giorno] || null;
 }
 
-function generaSlot(dataISO, durataMin){
+function orarioEsteso(dataISO){
   const fasce = orarioDisponibile(dataISO);
+  if(!fasce || !fasce.length) return null;
+  return [[fasce[0][0], fasce[fasce.length-1][1]]]; // un'unica fascia continua, senza pausa pranzo
+}
+
+function slotDaFasce(fasce, durataMin){
   if(!fasce) return [];
   const slots = [];
   fasce.forEach(([inizio,fine])=>{
@@ -599,6 +608,14 @@ function generaSlot(dataISO, durataMin){
     }
   });
   return slots;
+}
+
+function generaSlot(dataISO, durataMin){
+  return slotDaFasce(orarioDisponibile(dataISO), durataMin);
+}
+
+function generaSlotEsteso(dataISO, durataMin){
+  return slotDaFasce(orarioEsteso(dataISO), durataMin);
 }
 
 function slotOccupato(proId, dataISO, ora, durataMin, escludiApptId){
@@ -793,7 +810,8 @@ function renderClienteAuthForm(){
     html += `<div class="field"><label>Email</label><input type="text" id="login-email" placeholder="tuaemail@esempio.it"></div>
     <div class="field"><label>Password</label><input type="password" id="login-password" placeholder="••••••••"></div>
     ${clienteAuthErr ? `<div class="warn-box">${esc(clienteAuthErr)}</div>` : ''}
-    <div class="actions-row"><button class="btn" id="btn-cliente-accedi">Accedi</button></div>`;
+    <div class="actions-row"><button class="btn" id="btn-cliente-accedi">Accedi</button></div>
+    <div class="actions-row"><button class="btn ghost small" id="btn-cliente-password-dimenticata">Password dimenticata?</button></div>`;
   }
   html += `</div>`;
   return html;
@@ -1062,6 +1080,26 @@ function renderProDashboard(){
   html += `<div class="appt-row" style="padding-top:10px;"><strong>Totale settimana</strong><strong>${totaleSettimana}</strong></div>`;
   html += `</div>`;
 
+  html += `<h2 class="section-title">Lista della spesa</h2>
+  <div class="card">
+    <div class="field"><input type="text" id="spesa-nuovo-testo" placeholder="Es. Shampoo viola, asciugamani..."></div>
+    <div class="actions-row"><button class="btn small" id="btn-spesa-aggiungi">+ Aggiungi</button></div>
+  </div>`;
+  const listaSpesaStaff = (DB.spesa||[]).slice().sort((a,b)=> (a.data||'') < (b.data||'') ? 1 : -1);
+  if(listaSpesaStaff.length===0){
+    html += `<div class="empty">Nessuna richiesta al momento.</div>`;
+  } else {
+    listaSpesaStaff.forEach(s=>{
+      html += `<div class="card">
+        <div class="appt-row">
+          <div>${esc(s.testo)}</div>
+          <button class="btn ghost small" data-spesa-elimina="${s.id}">Fatto</button>
+        </div>
+        ${s.richiestoDa ? `<div class="appt-meta">richiesto da ${esc(s.richiestoDa)}</div>` : ''}
+      </div>`;
+    });
+  }
+
   return html;
 }
 
@@ -1167,7 +1205,7 @@ function renderPrenotazioneInterna(){
     if(DB.clients.length===0) html += `<div class="empty">Nessuna cliente registrata ancora — usa "Nuova cliente".</div>`;
   } else {
     html += `<div class="field"><label>Nome e cognome</label><input type="text" id="sb-nome" value="${esc(sb.nome)}"></div>
-    <div class="field"><label>Telefono</label><input type="tel" id="sb-telefono" value="${esc(sb.telefono)}"></div>`;
+    <div class="field"><label>Telefono (facoltativo)</label><input type="tel" id="sb-telefono" value="${esc(sb.telefono)}"></div>`;
   }
 
   // Area (solo admin può scegliere; per lo staff è fissa sulla propria)
@@ -1204,11 +1242,11 @@ function renderPrenotazioneInterna(){
   }
 
   if(servizioSel && !servizioSel.concordare && sb.proId && sb.data){
-    const fasce = orarioDisponibile(sb.data);
+    const fasce = orarioEsteso(sb.data);
     if(!fasce){
       html += `<div class="notice soft">Il salone è chiuso in questa data.</div>`;
     } else {
-      const slots = generaSlot(sb.data, servizioSel.durata);
+      const slots = generaSlotEsteso(sb.data, servizioSel.durata);
       html += `<div class="field"><label>Orario</label><div class="slot-grid">`;
       slots.forEach(ora=>{
         const occ = slotOccupato(sb.proId, sb.data, ora, servizioSel.durata, null);
@@ -1244,7 +1282,7 @@ function confermaPrenotazioneInterna(){
     clienteId = sb.clienteId;
   } else {
     const nome = sb.nome.trim(), telefono = sb.telefono.trim();
-    if(!nome || !telefono){ alert("Inserisci nome e telefono della nuova cliente."); return; }
+    if(!nome){ alert("Inserisci almeno il nome della cliente."); return; }
     clienteId = findOrCreateClient(nome, telefono).id;
   }
 
@@ -1284,6 +1322,7 @@ function confermaPrenotazioneInterna(){
 let adminAuth = false;
 let adminLoginErr = null;
 let adminTab = "agenda";
+let magazzinoForm = null; // null | {id, nome, categoria, prezzo, quantita, scorta} — id null = nuovo prodotto
 
 function renderAdmin(){
   if(!adminAuth) return renderAdminLogin();
@@ -1294,6 +1333,8 @@ function renderAdmin(){
   html += `<div class="tabbar">
     <button data-atab="agenda" class="${adminTab==='agenda'?'active':''}">Agenda</button>
     <button data-atab="clienti" class="${adminTab==='clienti'?'active':''}">Clienti</button>
+    <button data-atab="magazzino" class="${adminTab==='magazzino'?'active':''}">Magazzino</button>
+    <button data-atab="spesa" class="${adminTab==='spesa'?'active':''}">Spesa da fare</button>
     <button data-atab="stats" class="${adminTab==='stats'?'active':''}">Statistiche</button>
     <button data-atab="campagne" class="${adminTab==='campagne'?'active':''}">Campagne WhatsApp</button>
     <button data-atab="log" class="${adminTab==='log'?'active':''}">Log</button>
@@ -1302,6 +1343,8 @@ function renderAdmin(){
 
   if(adminTab==="agenda") html += renderAdminAgenda();
   if(adminTab==="clienti") html += renderAdminClienti();
+  if(adminTab==="magazzino") html += renderAdminMagazzino();
+  if(adminTab==="spesa") html += renderAdminSpesa();
   if(adminTab==="stats") html += renderAdminStats();
   if(adminTab==="campagne") html += renderAdminCampagne();
   if(adminTab==="log") html += renderAdminLog();
@@ -1384,6 +1427,73 @@ function renderAdminClienti(){
       </div>
     </div>`;
   });
+  return html;
+}
+
+function renderAdminMagazzino(){
+  const prodotti = (DB.magazzino||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome));
+  let html = `<h2 class="section-title">Magazzino</h2>`;
+
+  if(magazzinoForm){
+    const f = magazzinoForm;
+    html += `<div class="card">
+      <div class="appt-row"><strong>${f.id?'Modifica prodotto':'Nuovo prodotto'}</strong></div>
+      <div class="field"><label>Nome</label><input type="text" id="mag-nome" value="${esc(f.nome)}"></div>
+      <div class="field"><label>Categoria</label><input type="text" id="mag-categoria" value="${esc(f.categoria)}" placeholder="es. Capelli, Corpo, Viso..."></div>
+      <div class="field"><label>Prezzo di vendita (€)</label><input type="number" min="0" step="0.01" id="mag-prezzo" value="${f.prezzo}"></div>
+      <div class="field"><label>Quantità in giacenza</label><input type="number" min="0" step="1" id="mag-quantita" value="${f.quantita}"></div>
+      <div class="field"><label>Scorta minima (avviso sotto questa soglia)</label><input type="number" min="0" step="1" id="mag-scorta" value="${f.scorta}"></div>
+      <div class="actions-row">
+        <button class="btn" id="btn-salva-magazzino">Salva</button>
+        <button class="btn ghost" id="btn-annulla-magazzino">Annulla</button>
+      </div>
+    </div>`;
+  } else {
+    html += `<div class="actions-row" style="margin-bottom:6px;"><button class="btn" id="btn-nuovo-magazzino">+ Nuovo prodotto</button></div>`;
+  }
+
+  if(prodotti.length===0 && !magazzinoForm){
+    html += `<div class="empty">Nessun prodotto in magazzino ancora.</div>`;
+  }
+
+  prodotti.forEach(p=>{
+    const scorteBasse = (p.scorta>0) && (p.quantita <= p.scorta);
+    html += `<div class="card">
+      <div class="appt-row">
+        <div><strong>${esc(p.nome)}</strong><div class="appt-meta">${p.categoria?esc(p.categoria)+' · ':''}€${Number(p.prezzo||0).toFixed(2)} · ${p.quantita} in giacenza</div></div>
+        ${scorteBasse ? '<span class="badge warn">Scorta bassa</span>' : ''}
+      </div>
+      <div class="actions-row">
+        <input type="number" min="1" step="1" data-mag-input="${p.id}" placeholder="qtà" style="width:70px;padding:6px 8px;font-size:12px;">
+        <button class="btn ghost small" data-mag-carico="${p.id}">+ Carico</button>
+        <button class="btn ghost small" data-mag-scarico="${p.id}">- Scarico</button>
+      </div>
+      <div class="actions-row">
+        <button class="btn ghost small" data-mag-modifica="${p.id}">Modifica</button>
+        <button class="btn ghost small danger" data-mag-elimina="${p.id}">Elimina</button>
+      </div>
+    </div>`;
+  });
+
+  return html;
+}
+
+function renderAdminSpesa(){
+  const lista = (DB.spesa||[]).slice().sort((a,b)=> (a.data||'') < (b.data||'') ? 1 : -1);
+  let html = `<h2 class="section-title">Spesa da fare</h2>`;
+  if(lista.length===0){
+    html += `<div class="empty">Nessuna richiesta al momento.</div>`;
+  } else {
+    lista.forEach(s=>{
+      html += `<div class="card">
+        <div class="appt-row">
+          <div>${esc(s.testo)}</div>
+          <button class="btn ghost small" data-spesa-elimina="${s.id}">Fatto</button>
+        </div>
+        ${s.richiestoDa ? `<div class="appt-meta">richiesto da ${esc(s.richiestoDa)}</div>` : ''}
+      </div>`;
+    });
+  }
   return html;
 }
 
@@ -1580,6 +1690,11 @@ function attachHandlers(){
     logDebug('Registrazione: invio richiesta a Firebase Auth per ' + email);
     firebaseAuth.createUserWithEmailAndPassword(email, password).then(cred=>{
       logDebug('Registrazione: risposta OK, uid=' + cred.user.uid + ' - creo il profilo');
+      cred.user.sendEmailVerification().then(()=>{
+        logDebug('Email di verifica inviata a ' + email);
+      }).catch(e=>{
+        logDebug('Invio email di verifica fallito: ' + e.message);
+      });
       const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO()};
       clienteRecordFallback = nuovoCliente;
       DB.clients.push(nuovoCliente);
@@ -1614,6 +1729,20 @@ function attachHandlers(){
   });
   const btnClienteLogout = document.getElementById('btn-cliente-logout');
   if(btnClienteLogout) btnClienteLogout.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
+  const btnPasswordDimenticata = document.getElementById('btn-cliente-password-dimenticata');
+  if(btnPasswordDimenticata) btnPasswordDimenticata.addEventListener('click', ()=>{
+    const emailField = document.getElementById('login-email');
+    const email = (emailField && emailField.value.trim()) || "";
+    if(!email){ clienteAuthErr = "Scrivi la tua email qui sopra, poi premi di nuovo \"Password dimenticata?\"."; render(); return; }
+    if(!firebaseAuth){ alert("Servizio di accesso non disponibile al momento."); return; }
+    firebaseAuth.sendPasswordResetEmail(email).then(()=>{
+      clienteAuthErr = null;
+      alert(`Ti abbiamo inviato un'email a ${email} con le istruzioni per scegliere una nuova password. Controlla anche nello spam.`);
+    }).catch(err=>{
+      clienteAuthErr = traduciErroreAuth(err.code);
+      render();
+    });
+  });
   const btnRicaricaProfilo = document.getElementById('btn-ricarica-profilo');
   if(btnRicaricaProfilo) btnRicaricaProfilo.addEventListener('click', ()=>{ location.reload(); });
   const btnClienteLogoutStuck = document.getElementById('btn-cliente-logout-stuck');
@@ -1735,6 +1864,24 @@ function attachHandlers(){
   });
   const btnProLogout = document.getElementById('btn-pro-logout');
   if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; render(); });
+
+  // --- SPESA: aggiungi (staff) e elimina (staff + admin) ---
+  const btnSpesaAggiungi = document.getElementById('btn-spesa-aggiungi');
+  if(btnSpesaAggiungi) btnSpesaAggiungi.addEventListener('click', ()=>{
+    const campo = document.getElementById('spesa-nuovo-testo');
+    const testo = (campo && campo.value||"").trim();
+    if(!testo){ alert("Scrivi cosa serve."); return; }
+    if(!DB.spesa) DB.spesa = [];
+    const pro = proAuth ? getPro(proAuth.id) : null;
+    DB.spesa.push({id:uid("s"), testo, richiestoDa: pro?pro.nome:"", data:adessoISO()});
+    saveDB(); render();
+  });
+  app.querySelectorAll('[data-spesa-elimina]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      DB.spesa = (DB.spesa||[]).filter(s=>s.id!==b.dataset.spesaElimina);
+      saveDB(); render();
+    });
+  });
 
   // --- PRENOTAZIONE INTERNA (staff + admin) ---
   const btnApriStaff = document.querySelector('[data-apri-prenot-staff]');
@@ -1981,6 +2128,73 @@ function attachHandlers(){
       saveDB(); render();
     });
   });
+  // --- ADMIN: magazzino ---
+  const btnNuovoMagazzino = document.getElementById('btn-nuovo-magazzino');
+  if(btnNuovoMagazzino) btnNuovoMagazzino.addEventListener('click', ()=>{
+    magazzinoForm = {id:null, nome:"", categoria:"", prezzo:"0", quantita:"0", scorta:"0"};
+    render();
+  });
+  const btnAnnullaMagazzino = document.getElementById('btn-annulla-magazzino');
+  if(btnAnnullaMagazzino) btnAnnullaMagazzino.addEventListener('click', ()=>{
+    magazzinoForm = null;
+    render();
+  });
+  const btnSalvaMagazzino = document.getElementById('btn-salva-magazzino');
+  if(btnSalvaMagazzino) btnSalvaMagazzino.addEventListener('click', ()=>{
+    const nome = (document.getElementById('mag-nome').value||"").trim();
+    if(!nome){ alert("Inserisci il nome del prodotto."); return; }
+    const categoria = (document.getElementById('mag-categoria').value||"").trim();
+    const prezzo = parseFloat(document.getElementById('mag-prezzo').value) || 0;
+    const quantita = parseInt(document.getElementById('mag-quantita').value, 10) || 0;
+    const scorta = parseInt(document.getElementById('mag-scorta').value, 10) || 0;
+    if(!DB.magazzino) DB.magazzino = [];
+    if(magazzinoForm.id){
+      const p = DB.magazzino.find(x=>x.id===magazzinoForm.id);
+      if(p){ p.nome=nome; p.categoria=categoria; p.prezzo=prezzo; p.quantita=quantita; p.scorta=scorta; }
+    } else {
+      DB.magazzino.push({id:uid("m"), nome, categoria, prezzo, quantita, scorta});
+    }
+    magazzinoForm = null;
+    saveDB(); render();
+  });
+  app.querySelectorAll('[data-mag-modifica]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const p = (DB.magazzino||[]).find(x=>x.id===b.dataset.magModifica);
+      if(!p) return;
+      magazzinoForm = {id:p.id, nome:p.nome, categoria:p.categoria||"", prezzo:p.prezzo, quantita:p.quantita, scorta:p.scorta||0};
+      render();
+    });
+  });
+  app.querySelectorAll('[data-mag-elimina]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const p = (DB.magazzino||[]).find(x=>x.id===b.dataset.magElimina);
+      if(!p) return;
+      if(!confirm(`Eliminare "${p.nome}" dal magazzino?`)) return;
+      DB.magazzino = DB.magazzino.filter(x=>x.id!==p.id);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-mag-carico]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const p = (DB.magazzino||[]).find(x=>x.id===b.dataset.magCarico);
+      const input = app.querySelector(`[data-mag-input="${b.dataset.magCarico}"]`);
+      const n = parseInt(input && input.value, 10);
+      if(!p || !n || n<=0){ alert("Inserisci una quantità valida."); return; }
+      p.quantita = (p.quantita||0) + n;
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-mag-scarico]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const p = (DB.magazzino||[]).find(x=>x.id===b.dataset.magScarico);
+      const input = app.querySelector(`[data-mag-input="${b.dataset.magScarico}"]`);
+      const n = parseInt(input && input.value, 10);
+      if(!p || !n || n<=0){ alert("Inserisci una quantità valida."); return; }
+      p.quantita = Math.max(0, (p.quantita||0) - n);
+      saveDB(); render();
+    });
+  });
+
   const btnCampagna = document.getElementById('btn-invia-campagna');
   if(btnCampagna) btnCampagna.addEventListener('click', ()=>{
     const testo = document.getElementById('campagna-testo').value.trim();
