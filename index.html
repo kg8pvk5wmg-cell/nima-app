@@ -234,6 +234,14 @@ window.addEventListener('error', function(e){
     el.textContent = 'Si è verificato un errore tecnico: ' + (e && e.message ? e.message : 'errore sconosciuto') + '. Ricarica la pagina; se persiste, segnalalo.';
   }
 });
+window.addEventListener('unhandledrejection', function(e){
+  const el = document.getElementById('dbAvviso');
+  if(el){
+    el.style.display = 'block';
+    const dettaglio = e.reason && e.reason.message ? e.reason.message : (e.reason && e.reason.code ? e.reason.code : String(e.reason));
+    el.textContent = 'Si è verificato un errore tecnico (operazione non riuscita): ' + dettaglio + '. Ricarica la pagina; se persiste, segnalalo.';
+  }
+});
 /* ====================== DATI DI BASE ====================== */
 const AREE = ["Parrucchiera","Onicotecnica","Estetista","Make-up"];
 
@@ -504,11 +512,13 @@ function calcolaAcconto(prezzo){ return Math.round(prezzo*0.30*100)/100; }
 
 /* ====================== RENDER PRINCIPALE ====================== */
 function render(){
-  const campoAttivo = document.activeElement && document.activeElement.tagName;
-  if(campoAttivo === "INPUT" || campoAttivo === "TEXTAREA"){
-    return; // non ridisegnare la pagina mentre l'utente sta scrivendo in un campo
-  }
   const app = document.getElementById('app');
+  // salva quale campo di testo ha il focus (e la posizione del cursore) per ripristinarlo dopo il ridisegno,
+  // così il ridisegno avviene sempre (i pulsanti restano sempre attivi) senza interrompere chi sta scrivendo
+  const campoFocus = document.activeElement;
+  const focusInfo = (campoFocus && (campoFocus.tagName === "INPUT" || campoFocus.tagName === "TEXTAREA") && campoFocus.id)
+    ? {id: campoFocus.id, start: campoFocus.selectionStart, end: campoFocus.selectionEnd}
+    : null;
   if(!DB){
     app.innerHTML = '<div class="empty">Caricamento dati in corso...</div>';
     return;
@@ -519,6 +529,15 @@ function render(){
   if(currentRole==="admin") app.innerHTML = renderAdmin();
   document.getElementById('footerNote').innerHTML = "";
   attachHandlers();
+  if(focusInfo){
+    const nuovoCampo = document.getElementById(focusInfo.id);
+    if(nuovoCampo && (nuovoCampo.tagName === "INPUT" || nuovoCampo.tagName === "TEXTAREA")){
+      nuovoCampo.focus();
+      if(typeof focusInfo.start === "number" && nuovoCampo.setSelectionRange){
+        try{ nuovoCampo.setSelectionRange(focusInfo.start, focusInfo.end); }catch(e){}
+      }
+    }
+  }
 }
 
 document.getElementById('roleNav').addEventListener('click', (e)=>{
@@ -565,7 +584,15 @@ function renderCliente(){
     saveDB();
     clienteRecord = clienteRecordFallback;
   }
-  if(!clienteRecord) return `<div class="empty">Caricamento profilo...<br><button class="btn ghost small" id="btn-ricarica-profilo" style="margin-top:12px;">Ricarica pagina</button></div>`;
+  if(!clienteRecord) return `<div class="empty">Caricamento profilo...<br><button class="btn ghost small" id="btn-ricarica-profilo" style="margin-top:12px;">Ricarica pagina</button><br><button class="btn ghost small" id="btn-cliente-logout-stuck" style="margin-top:8px;">Esci e registrati di nuovo</button>
+  <div style="margin-top:18px;font-size:11px;color:#8a8a8a;text-align:left;background:#f5f5f5;padding:10px;border-radius:8px;line-height:1.6;">
+  Info tecniche (per assistenza):<br>
+  uid account: ${esc(clienteAuth.uid)}<br>
+  email account: ${esc(clienteAuth.email||'(nessuna)')}<br>
+  database caricato: ${DB ? 'sì' : 'NO'}<br>
+  clienti nel database: ${DB && DB.clients ? DB.clients.length : 'n/d'}<br>
+  copia locale disponibile: ${clienteRecordFallback ? ('sì, uid='+esc(clienteRecordFallback.authUid)) : 'no'}
+  </div></div>`;
 
   let html = `<div class="appt-row" style="align-items:center;margin-bottom:6px;">
     <div class="appt-meta" style="margin-top:0;">Accesso come <strong>${esc(clienteRecord.nome)}</strong></div>
@@ -1264,6 +1291,8 @@ function attachHandlers(){
   if(btnClienteLogout) btnClienteLogout.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
   const btnRicaricaProfilo = document.getElementById('btn-ricarica-profilo');
   if(btnRicaricaProfilo) btnRicaricaProfilo.addEventListener('click', ()=>{ location.reload(); });
+  const btnClienteLogoutStuck = document.getElementById('btn-cliente-logout-stuck');
+  if(btnClienteLogoutStuck) btnClienteLogoutStuck.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
 
   // --- CLIENTE: tab ---
   app.querySelectorAll('.tabbar button[data-tab]').forEach(b=>{
