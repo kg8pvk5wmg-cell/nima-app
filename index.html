@@ -535,6 +535,7 @@ document.getElementById('roleNav').addEventListener('click', (e)=>{
 let bookingState = {area:null, serviceId:null, proId:null, data:null, ora:null};
 let clienteAuth = null; // {uid, email} quando la cliente ha fatto login
 let clienteRecord = null; // record collegato in DB.clients
+let clienteRecordFallback = null; // copia locale del profilo appena creato, usata se il database condiviso non lo trova subito
 let clienteAuthModo = "accedi"; // "accedi" | "registrati"
 let clienteAuthErr = null;
 let vistaClienteTab = "prenota";
@@ -558,7 +559,13 @@ function trovaClienteDaUid(uid){
 function renderCliente(){
   if(!clienteAuth) return renderClienteAuthForm();
   clienteRecord = trovaClienteDaUid(clienteAuth.uid);
-  if(!clienteRecord) return `<div class="empty">Caricamento profilo...</div>`;
+  if(!clienteRecord && clienteRecordFallback && clienteRecordFallback.authUid===clienteAuth.uid){
+    // il profilo non risulta ancora nel database condiviso: lo ripristiniamo e lo salviamo di nuovo
+    DB.clients.push(clienteRecordFallback);
+    saveDB();
+    clienteRecord = clienteRecordFallback;
+  }
+  if(!clienteRecord) return `<div class="empty">Caricamento profilo...<br><button class="btn ghost small" id="btn-ricarica-profilo" style="margin-top:12px;">Ricarica pagina</button></div>`;
 
   let html = `<div class="appt-row" style="align-items:center;margin-bottom:6px;">
     <div class="appt-meta" style="margin-top:0;">Accesso come <strong>${esc(clienteRecord.nome)}</strong></div>
@@ -1227,6 +1234,7 @@ function attachHandlers(){
     if(!nome || !telefono || !email || !password){ clienteAuthErr = "Compila tutti i campi."; render(); return; }
     firebaseAuth.createUserWithEmailAndPassword(email, password).then(cred=>{
       const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO()};
+      clienteRecordFallback = nuovoCliente;
       DB.clients.push(nuovoCliente);
       log(`Nuova cliente registrata: ${nome}`);
       clienteAuth = {uid:cred.user.uid, email:cred.user.email};
@@ -1254,6 +1262,8 @@ function attachHandlers(){
   });
   const btnClienteLogout = document.getElementById('btn-cliente-logout');
   if(btnClienteLogout) btnClienteLogout.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
+  const btnRicaricaProfilo = document.getElementById('btn-ricarica-profilo');
+  if(btnRicaricaProfilo) btnRicaricaProfilo.addEventListener('click', ()=>{ location.reload(); });
 
   // --- CLIENTE: tab ---
   app.querySelectorAll('.tabbar button[data-tab]').forEach(b=>{
