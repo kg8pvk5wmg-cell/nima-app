@@ -1,0 +1,15 @@
+{
+  "name": "Nima Hair & Beauty",
+  "short_name": "Nima",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#fdf7fa",
+  "theme_color": "#d61f7a",
+  "icons": [
+    {
+      "src": "logo-nima.jpg",
+      "sizes": "300x300",
+      "type": "image/jpeg"
+    }
+  ]
+}
