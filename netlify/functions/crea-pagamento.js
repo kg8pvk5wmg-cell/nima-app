@@ -31,6 +31,7 @@ exports.handler = async function (event) {
     });
     const me = await meResp.json();
     if (!meResp.ok) {
+      console.error("SumUp /me fallita:", meResp.status, JSON.stringify(me));
       return { statusCode: meResp.status, body: JSON.stringify({ error: "Errore recupero account SumUp", dettagli: me }) };
     }
     const merchantCode =
@@ -59,6 +60,7 @@ exports.handler = async function (event) {
     });
     const checkout = await checkoutResp.json();
     if (!checkoutResp.ok) {
+      console.error("SumUp /checkouts fallita:", checkoutResp.status, JSON.stringify(checkout));
       return { statusCode: checkoutResp.status, body: JSON.stringify({ error: "Errore creazione pagamento", dettagli: checkout }) };
     }
 
@@ -70,6 +72,7 @@ exports.handler = async function (event) {
       }),
     };
   } catch (e) {
+    console.error("Errore imprevisto in crea-pagamento:", e.message);
     return { statusCode: 500, body: JSON.stringify({ error: e.message }) };
   }
 };
