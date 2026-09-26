@@ -569,6 +569,11 @@ function adessoISO(){ return new Date().toISOString(); }
 
 function getService(id){ return DB.services.find(s=>s.id===id); }
 function getPro(id){ return DB.pros.find(p=>p.id===id); }
+function nomeApptCliente(a){
+  if(a.ospite) return a.ospite.nome;
+  const c = DB.clients.find(x=>x.id===a.clienteId);
+  return c ? c.nome : "Cliente";
+}
 
 function findOrCreateClient(nome, telefono){
   let c = telefono ? DB.clients.find(c=>c.telefono===telefono) : null;
@@ -985,6 +990,7 @@ function apptCompletamentePagato(a){
 }
 
 function sincronizzaPuntiFedelta(a){
+  if(a.ospite) return; // gli ospiti non hanno un account cliente su cui accumulare punti
   const cliente = DB.clients.find(c=>c.id===a.clienteId);
   const s = getService(a.serviceId);
   if(!cliente || !s) return;
@@ -1006,6 +1012,7 @@ let proLoginSel = DEFAULT_PROS[0].id;
 let proLoginErr = null;
 let apptSelezionataNota = null;
 let settimanaOffset = 0; // 0 = settimana corrente, +1 = prossima, -1 = precedente...
+let giornoSettimanaEspanso = null; // data ISO del giorno aperto nel riepilogo settimanale, o null
 
 function renderProfessionista(){
   if(!proAuth) return renderProLogin();
@@ -1037,8 +1044,13 @@ function renderProDashboard(){
 
   if(staffBooking && staffBooking.scope.kind==="staff"){
     html += renderPrenotazioneInterna();
+  } else if(registraClienteForm){
+    html += renderFormRegistraCliente();
   } else {
-    html += `<div class="actions-row" style="margin-top:10px;"><button class="btn" data-apri-prenot-staff="${proAuth.id}">+ Nuovo appuntamento</button></div>`;
+    html += `<div class="actions-row" style="margin-top:10px;">
+      <button class="btn" data-apri-prenot-staff="${proAuth.id}">+ Nuovo appuntamento</button>
+      <button class="btn ghost" id="btn-apri-registra-cliente">Registra nuova cliente</button>
+    </div>`;
   }
 
   // OGGI — grande, con tutti gli appuntamenti del giorno
@@ -1046,23 +1058,7 @@ function renderProDashboard(){
   if(oggiAppts.length===0){
     html += `<div class="empty">Nessun appuntamento oggi.</div>`;
   } else {
-    oggiAppts.forEach(a=>{
-      const s = getService(a.serviceId); const c = DB.clients.find(c=>c.id===a.clienteId);
-      html += `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
-        <div class="appt-row">
-          <div><strong style="font-size:15.5px;">${a.ora} · ${c?c.nome:'Cliente'}</strong><div class="appt-meta">${s?s.name:''}${s?` · ${s.durata} min`:''}</div></div>
-          <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
-        </div>
-        <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
-        <div class="actions-row">
-          <button class="btn ghost small" data-stato="${a.id}|No-show">Segna assente</button>
-          <button class="btn ghost small" data-stato="${a.id}|Annullato">Annulla</button>
-          <button class="btn small" data-nota="${a.id}">${apptSelezionataNota===a.id?'Chiudi nota':'Aggiungi nota'}</button>
-          ${serveConfermaManuale(a) ? `<button class="btn ghost small" data-toggle-pagato="${a.id}">${a.pagatoManuale?'Segna come non pagato':'Segna come pagato'}</button>` : ''}
-        </div>
-        ${apptSelezionataNota===a.id ? renderFormNota(a) : ''}
-      </div>`;
-    });
+    oggiAppts.forEach(a=>{ html += renderApptCardStaff(a); });
   }
 
   // RIEPILOGO SETTIMANALE — sotto, più compatto
@@ -1075,12 +1071,22 @@ function renderProDashboard(){
   </div>`;
   html += `<div class="card">`;
   giorniSettimana.forEach(data=>{
-    const appts = DB.appts.filter(a=>a.proId===proAuth.id && a.data===data && a.stato!=="Annullato");
+    const appts = DB.appts.filter(a=>a.proId===proAuth.id && a.data===data && a.stato!=="Annullato").sort((a,b)=> a.ora>b.ora?1:-1);
     const isOggi = data===oggi;
-    html += `<div class="appt-row" style="padding:6px 0;border-bottom:1px solid var(--line);${isOggi?'font-weight:600;':''}">
+    const espanso = giornoSettimanaEspanso===data;
+    html += `<div class="appt-row" data-espandi-giorno="${data}" style="padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer;${isOggi?'font-weight:600;':''}">
       <div>${fmtData(data)}${isOggi?' (oggi)':''}</div>
-      <div class="appt-meta" style="margin-top:0;">${appts.length} appuntament${appts.length===1?'o':'i'}</div>
+      <div class="appt-meta" style="margin-top:0;">${appts.length} appuntament${appts.length===1?'o':'i'} ${espanso?'▲':'▼'}</div>
     </div>`;
+    if(espanso){
+      if(appts.length===0){
+        html += `<div class="empty" style="padding:8px 0 14px;">Nessun appuntamento questo giorno.</div>`;
+      } else {
+        html += `<div style="padding:10px 0 4px;">`;
+        appts.forEach(a=>{ html += renderApptCardStaff(a); });
+        html += `</div>`;
+      }
+    }
   });
   const totaleSettimana = giorniSettimana.reduce((tot,data)=> tot + DB.appts.filter(a=>a.proId===proAuth.id && a.data===data && a.stato!=="Annullato").length, 0);
   html += `<div class="appt-row" style="padding-top:10px;"><strong>Totale settimana</strong><strong>${totaleSettimana}</strong></div>`;
@@ -1124,6 +1130,62 @@ function getGiorniSettimana(offset){
   return giorni;
 }
 
+function renderApptCardStaff(a){
+  const s = getService(a.serviceId); const c = a.ospite ? null : DB.clients.find(c=>c.id===a.clienteId);
+  const noteCliente = c ? c.note.filter(n=>n.area===a.area) : [];
+  return `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
+    <div class="appt-row">
+      <div><strong style="font-size:15.5px;">${a.ora} · ${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${s?s.name:''}${s?` · ${s.durata} min`:''}</div></div>
+      <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
+    </div>
+    <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
+    ${noteCliente.length && apptSelezionataNota!==a.id ? `<div class="appt-meta">📝 ${noteCliente.length} nota${noteCliente.length===1?'':'e'} in archivio — clicca "Note" per leggerle</div>` : ''}
+    <div class="actions-row">
+      <button class="btn ghost small" data-stato="${a.id}|No-show">Segna assente</button>
+      <button class="btn ghost small" data-stato="${a.id}|Annullato">Annulla</button>
+      ${!a.ospite ? `<button class="btn small" data-nota="${a.id}">${apptSelezionataNota===a.id?'Chiudi note':'Note'}${noteCliente.length && apptSelezionataNota!==a.id?` (${noteCliente.length})`:''}</button>` : ''}
+      ${serveConfermaManuale(a) ? `<button class="btn ghost small" data-toggle-pagato="${a.id}">${a.pagatoManuale?'Segna come non pagato':'Segna come pagato'}</button>` : ''}
+    </div>
+    ${!a.ospite && apptSelezionataNota===a.id ? renderFormNota(a) : ''}
+  </div>`;
+}
+
+function renderFormRegistraCliente(){
+  const f = registraClienteForm;
+  return `<div class="card">
+    <div class="appt-row"><strong>Registra nuova cliente</strong></div>
+    <div class="field"><label>Nome e cognome</label><input type="text" id="reg2-nome" value="${esc(f.nome)}"></div>
+    <div class="field"><label>Telefono (facoltativo)</label><input type="tel" id="reg2-telefono" value="${esc(f.telefono)}"></div>
+    <div class="field"><label>Email</label><input type="text" id="reg2-email" value="${esc(f.email)}" placeholder="cliente@esempio.it"></div>
+    <div class="field"><label>Password iniziale</label>
+      <div class="actions-row" style="margin-top:0;">
+        <input type="text" id="reg2-password" value="${esc(f.password)}" placeholder="almeno 6 caratteri" style="flex:1;">
+        <button class="btn ghost small" id="btn-genera-password">Genera</button>
+      </div>
+    </div>
+    <div class="notice soft">La cliente potrà accedere con questa email e password, e cambiarla quando vuole da "Password dimenticata?" nella schermata di accesso.</div>
+    ${registraClienteErr ? `<div class="warn-box">${esc(registraClienteErr)}</div>` : ''}
+    <div class="actions-row">
+      <button class="btn" id="btn-salva-registra-cliente">Registra</button>
+      <button class="btn ghost" id="btn-annulla-registra-cliente">Annulla</button>
+    </div>
+  </div>`;
+}
+
+function creaAccessoClienteViaStaff(email, password){
+  let secondaryApp;
+  try{
+    secondaryApp = firebase.app("StaffClientCreation");
+  }catch(e){
+    secondaryApp = firebase.initializeApp(firebaseConfig, "StaffClientCreation");
+  }
+  const secondaryAuth = secondaryApp.auth();
+  return secondaryAuth.createUserWithEmailAndPassword(email, password).then(cred=>{
+    const nuovoAuthUid = cred.user.uid;
+    return cred.user.sendEmailVerification().catch(()=>{}).then(()=>secondaryAuth.signOut()).then(()=>nuovoAuthUid);
+  });
+}
+
 function renderFormNota(appt){
   const c = DB.clients.find(c=>c.id===appt.clienteId);
   const noteEsistenti = c ? c.note.filter(n=>n.area===appt.area) : [];
@@ -1152,6 +1214,7 @@ function apriPrenotazioneInterna(scope){
     clienteDropdownAperto: false,
     nome: "",
     telefono: "",
+    email: "",
     area: scope.kind==="staff" ? getPro(scope.proId).aree[0] : null,
     serviceId: null,
     proId: scope.kind==="staff" ? scope.proId : null,
@@ -1211,7 +1274,9 @@ function renderPrenotazioneInterna(){
     if(DB.clients.length===0) html += `<div class="empty">Nessuna cliente registrata ancora — usa "Nuova cliente".</div>`;
   } else {
     html += `<div class="field"><label>Nome e cognome</label><input type="text" id="sb-nome" value="${esc(sb.nome)}"></div>
-    <div class="field"><label>Telefono (facoltativo)</label><input type="tel" id="sb-telefono" value="${esc(sb.telefono)}"></div>`;
+    <div class="field"><label>Telefono (facoltativo)</label><input type="tel" id="sb-telefono" value="${esc(sb.telefono)}"></div>
+    <div class="field"><label>Email (facoltativa)</label><input type="text" id="sb-email" value="${esc(sb.email)}"></div>
+    <div class="notice soft">Questa cliente non verrà salvata in "Clienti": l'appuntamento resta comunque in agenda.</div>`;
   }
 
   // Area (solo admin può scegliere; per lo staff è fissa sulla propria)
@@ -1282,14 +1347,17 @@ function confermaPrenotazioneInterna(){
   const sb = staffBooking;
   const servizio = getService(sb.serviceId);
 
-  let clienteId;
+  let clienteId = null, ospite = null, nomeVisualizzato;
   if(sb.clienteMode==="esistente"){
     if(!sb.clienteId){ alert("Seleziona una cliente."); return; }
     clienteId = sb.clienteId;
+    const clienteEsistente = DB.clients.find(c=>c.id===clienteId);
+    nomeVisualizzato = clienteEsistente ? clienteEsistente.nome : "Cliente";
   } else {
-    const nome = sb.nome.trim(), telefono = sb.telefono.trim();
+    const nome = sb.nome.trim(), telefono = sb.telefono.trim(), email = (sb.email||"").trim();
     if(!nome){ alert("Inserisci almeno il nome della cliente."); return; }
-    clienteId = findOrCreateClient(nome, telefono).id;
+    ospite = {nome, telefono, email};
+    nomeVisualizzato = nome;
   }
 
   if(slotOccupato(sb.proId, sb.data, sb.ora, servizio.durata, null)){
@@ -1311,14 +1379,13 @@ function confermaPrenotazioneInterna(){
   }
 
   const appt = {
-    id: uid("a"), clienteId, area: sb.area, serviceId: sb.serviceId, proId: sb.proId,
+    id: uid("a"), clienteId, ospite, area: sb.area, serviceId: sb.serviceId, proId: sb.proId,
     data: sb.data, ora: sb.ora, stato: "Confermato", pagamento, creato: adessoISO(),
     inseritoDaStaff: true
   };
   DB.appts.push(appt);
   sincronizzaPuntiFedelta(appt);
-  const cliente = DB.clients.find(c=>c.id===clienteId);
-  log(`Appuntamento inserito dallo staff: ${cliente.nome} — ${servizio.name} il ${appt.data} ${appt.ora} con ${getPro(sb.proId).nome}`);
+  log(`Appuntamento inserito dallo staff: ${nomeVisualizzato} — ${servizio.name} il ${appt.data} ${appt.ora} con ${getPro(sb.proId).nome}`);
   saveDB();
   staffBooking = null;
   render();
@@ -1329,6 +1396,8 @@ let adminAuth = false;
 let adminLoginErr = null;
 let adminTab = "agenda";
 let magazzinoForm = null; // null | {id, nome, categoria, prezzo, quantita, scorta} — id null = nuovo prodotto
+let registraClienteForm = null; // null | {nome, telefono, email, password}
+let registraClienteErr = null;
 
 function renderAdmin(){
   if(!adminAuth) return renderAdminLogin();
@@ -1372,16 +1441,21 @@ function renderAdminAgenda(){
   let html = ``;
   if(staffBooking && staffBooking.scope.kind==="admin"){
     html += renderPrenotazioneInterna();
+  } else if(registraClienteForm){
+    html += renderFormRegistraCliente();
   } else {
-    html += `<div class="actions-row" style="margin-bottom:6px;"><button class="btn" id="btn-apri-prenot-admin">+ Nuovo appuntamento</button></div>`;
+    html += `<div class="actions-row" style="margin-bottom:6px;">
+      <button class="btn" id="btn-apri-prenot-admin">+ Nuovo appuntamento</button>
+      <button class="btn ghost" id="btn-apri-registra-cliente">Registra nuova cliente</button>
+    </div>`;
   }
   html += `<h2 class="section-title">Tutti gli appuntamenti</h2>`;
   if(tutti.length===0) html += `<div class="empty">Nessun appuntamento registrato ancora. Prova a prenotarne uno dall'Area Cliente.</div>`;
   tutti.forEach(a=>{
-    const s = getService(a.serviceId); const p = getPro(a.proId); const c = DB.clients.find(c=>c.id===a.clienteId);
+    const s = getService(a.serviceId); const p = getPro(a.proId);
     html += `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
       <div class="appt-row">
-        <div><strong>${c?c.nome:'Cliente'}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${s?s.name:''} · ${p?p.nome:''}</div></div>
+        <div><strong>${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${s?s.name:''} · ${p?p.nome:''}</div></div>
         <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
       </div>
       <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
@@ -1869,15 +1943,23 @@ function attachHandlers(){
     render();
   });
   const btnProLogout = document.getElementById('btn-pro-logout');
-  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; settimanaOffset = 0; render(); });
+  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; settimanaOffset = 0; giornoSettimanaEspanso = null; registraClienteForm = null; render(); });
 
   // --- STAFF: navigazione settimane riepilogo ---
   const btnSettimanaPrev = document.getElementById('btn-settimana-prev');
-  if(btnSettimanaPrev) btnSettimanaPrev.addEventListener('click', ()=>{ settimanaOffset--; render(); });
+  if(btnSettimanaPrev) btnSettimanaPrev.addEventListener('click', ()=>{ settimanaOffset--; giornoSettimanaEspanso = null; render(); });
   const btnSettimanaNext = document.getElementById('btn-settimana-next');
-  if(btnSettimanaNext) btnSettimanaNext.addEventListener('click', ()=>{ settimanaOffset++; render(); });
+  if(btnSettimanaNext) btnSettimanaNext.addEventListener('click', ()=>{ settimanaOffset++; giornoSettimanaEspanso = null; render(); });
   const btnSettimanaOggi = document.getElementById('btn-settimana-oggi');
-  if(btnSettimanaOggi) btnSettimanaOggi.addEventListener('click', ()=>{ settimanaOffset=0; render(); });
+  if(btnSettimanaOggi) btnSettimanaOggi.addEventListener('click', ()=>{ settimanaOffset=0; giornoSettimanaEspanso = null; render(); });
+  app.querySelectorAll('[data-espandi-giorno]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const data = row.dataset.espandiGiorno;
+      giornoSettimanaEspanso = giornoSettimanaEspanso===data ? null : data;
+      apptSelezionataNota = null;
+      render();
+    });
+  });
 
   // --- SPESA: aggiungi (staff) e elimina (staff + admin) ---
   const btnSpesaAggiungi = document.getElementById('btn-spesa-aggiungi');
@@ -1902,11 +1984,59 @@ function attachHandlers(){
   if(btnApriStaff) btnApriStaff.addEventListener('click', ()=>{ apriPrenotazioneInterna({kind:"staff", proId: proAuth.id}); });
   const btnApriAdmin = document.getElementById('btn-apri-prenot-admin');
   if(btnApriAdmin) btnApriAdmin.addEventListener('click', ()=>{ apriPrenotazioneInterna({kind:"admin"}); });
+
+  // --- REGISTRA NUOVA CLIENTE (staff + admin) ---
+  const btnApriRegistraCliente = document.getElementById('btn-apri-registra-cliente');
+  if(btnApriRegistraCliente) btnApriRegistraCliente.addEventListener('click', ()=>{
+    registraClienteForm = {nome:"", telefono:"", email:"", password:""};
+    registraClienteErr = null;
+    render();
+  });
+  const btnAnnullaRegistraCliente = document.getElementById('btn-annulla-registra-cliente');
+  if(btnAnnullaRegistraCliente) btnAnnullaRegistraCliente.addEventListener('click', ()=>{
+    registraClienteForm = null;
+    render();
+  });
+  const reg2Nome = document.getElementById('reg2-nome');
+  if(reg2Nome) reg2Nome.addEventListener('input', e=>{ registraClienteForm.nome = e.target.value; });
+  const reg2Telefono = document.getElementById('reg2-telefono');
+  if(reg2Telefono) reg2Telefono.addEventListener('input', e=>{ registraClienteForm.telefono = e.target.value; });
+  const reg2Email = document.getElementById('reg2-email');
+  if(reg2Email) reg2Email.addEventListener('input', e=>{ registraClienteForm.email = e.target.value; });
+  const reg2Password = document.getElementById('reg2-password');
+  if(reg2Password) reg2Password.addEventListener('input', e=>{ registraClienteForm.password = e.target.value; });
+  const btnGeneraPassword = document.getElementById('btn-genera-password');
+  if(btnGeneraPassword) btnGeneraPassword.addEventListener('click', ()=>{
+    registraClienteForm.password = Math.random().toString(36).slice(2,10);
+    render();
+  });
+  const btnSalvaRegistraCliente = document.getElementById('btn-salva-registra-cliente');
+  if(btnSalvaRegistraCliente) btnSalvaRegistraCliente.addEventListener('click', ()=>{
+    const f = registraClienteForm;
+    const nome = f.nome.trim(), telefono = f.telefono.trim(), email = f.email.trim(), password = f.password;
+    if(!nome || !email || !password){ registraClienteErr = "Compila nome, email e password."; render(); return; }
+    if(password.length < 6){ registraClienteErr = "La password deve avere almeno 6 caratteri."; render(); return; }
+    if(!firebaseAuth){ registraClienteErr = "Servizio di accesso non disponibile al momento."; render(); return; }
+    registraClienteErr = null;
+    creaAccessoClienteViaStaff(email, password).then(nuovoAuthUid=>{
+      const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:nuovoAuthUid, note:[], creato:adessoISO()};
+      DB.clients.push(nuovoCliente);
+      log(`Cliente registrata dallo staff: ${nome}`);
+      saveDB();
+      registraClienteForm = null;
+      alert(`${nome} è stata registrata. Può accedere con l'email ${email} e la password scelta.`);
+      render();
+    }).catch(err=>{
+      registraClienteErr = traduciErroreAuth(err.code);
+      render();
+    });
+  });
+
   const btnChiudiInterna = document.getElementById('btn-chiudi-prenot-interna');
   if(btnChiudiInterna) btnChiudiInterna.addEventListener('click', chiudiPrenotazioneInterna);
 
   app.querySelectorAll('.tabbar button[data-cmode]').forEach(b=>{
-    b.addEventListener('click', ()=>{ staffBooking.clienteMode = b.dataset.cmode; staffBooking.clienteId=""; staffBooking.clienteQuery=""; staffBooking.clienteDropdownAperto=false; staffBooking.nome=""; staffBooking.telefono=""; render(); });
+    b.addEventListener('click', ()=>{ staffBooking.clienteMode = b.dataset.cmode; staffBooking.clienteId=""; staffBooking.clienteQuery=""; staffBooking.clienteDropdownAperto=false; staffBooking.nome=""; staffBooking.telefono=""; staffBooking.email=""; render(); });
   });
   const cliTrigger = document.getElementById('cli-select-trigger');
   if(cliTrigger) cliTrigger.addEventListener('click', e=>{
@@ -1931,6 +2061,8 @@ function attachHandlers(){
   if(sbNome) sbNome.addEventListener('input', e=>{ staffBooking.nome = e.target.value; });
   const sbTelefono = document.getElementById('sb-telefono');
   if(sbTelefono) sbTelefono.addEventListener('input', e=>{ staffBooking.telefono = e.target.value; });
+  const sbEmail = document.getElementById('sb-email');
+  if(sbEmail) sbEmail.addEventListener('input', e=>{ staffBooking.email = e.target.value; });
   const sbArea = document.getElementById('sb-area');
   if(sbArea) sbArea.addEventListener('change', e=>{
     staffBooking.area = e.target.value || null;
@@ -2007,7 +2139,7 @@ function attachHandlers(){
     render();
   });
   const btnAdminLogout = document.getElementById('btn-admin-logout');
-  if(btnAdminLogout) btnAdminLogout.addEventListener('click', ()=>{ adminAuth = false; render(); });
+  if(btnAdminLogout) btnAdminLogout.addEventListener('click', ()=>{ adminAuth = false; registraClienteForm = null; render(); });
 
   // --- ADMIN: gestione accessi ---
   const btnCambiaAdminPass = document.getElementById('btn-cambia-admin-pass');
@@ -2062,8 +2194,7 @@ function attachHandlers(){
       if(!a) return;
       a.pagatoManuale = !a.pagatoManuale;
       sincronizzaPuntiFedelta(a);
-      const c = DB.clients.find(x=>x.id===a.clienteId);
-      log(`${a.pagatoManuale?'Segnato come pagato':'Segnato come non pagato'} l'appuntamento di ${c?c.nome:'cliente'} del ${a.data} ${a.ora}`);
+      log(`${a.pagatoManuale?'Segnato come pagato':'Segnato come non pagato'} l'appuntamento di ${nomeApptCliente(a)} del ${a.data} ${a.ora}`);
       saveDB(); render();
     });
   });
@@ -2071,10 +2202,10 @@ function attachHandlers(){
     b.addEventListener('click', ()=>{
       const a = DB.appts.find(x=>x.id===b.dataset.eliminaAppt);
       if(!a) return;
-      const s = getService(a.serviceId); const c = DB.clients.find(x=>x.id===a.clienteId);
-      if(!confirm(`Eliminare definitivamente l'appuntamento di ${c?c.nome:'cliente'} (${fmtData(a.data)} ${a.ora}${s?', '+s.name:''})? L'appuntamento sparirà del tutto, anche dallo storico. Questa azione non si può annullare.`)) return;
+      const s = getService(a.serviceId);
+      if(!confirm(`Eliminare definitivamente l'appuntamento di ${nomeApptCliente(a)} (${fmtData(a.data)} ${a.ora}${s?', '+s.name:''})? L'appuntamento sparirà del tutto, anche dallo storico. Questa azione non si può annullare.`)) return;
       DB.appts = DB.appts.filter(x=>x.id!==a.id);
-      log(`Admin ha eliminato definitivamente l'appuntamento di ${c?c.nome:'cliente'} del ${a.data} ${a.ora}`);
+      log(`Admin ha eliminato definitivamente l'appuntamento di ${nomeApptCliente(a)} del ${a.data} ${a.ora}`);
       saveDB(); render();
     });
   });
