@@ -242,6 +242,12 @@ window.addEventListener('unhandledrejection', function(e){
     el.textContent = 'Si è verificato un errore tecnico (operazione non riuscita): ' + dettaglio + '. Ricarica la pagina; se persiste, segnalalo.';
   }
 });
+let debugLog = [];
+function logDebug(msg){
+  const ora = new Date().toLocaleTimeString('it-IT');
+  debugLog.push(ora + ' - ' + msg);
+  if(debugLog.length > 25) debugLog.shift();
+}
 /* ====================== DATI DI BASE ====================== */
 const AREE = ["Parrucchiera","Onicotecnica","Estetista","Make-up"];
 
@@ -402,13 +408,16 @@ function loadDB(){
   docRef.onSnapshot(snap=>{
     if(snap.exists){
       DB = snap.data();
+      logDebug('Firestore: dati ricevuti, clienti nel documento=' + (DB.clients?DB.clients.length:'n/d'));
     } else {
       DB = defaultDB();
+      logDebug('Firestore: il documento condiviso NON esiste, creo dati di default');
       docRef.set(DB).catch(e=>console.error("Errore creazione dati iniziali", e));
     }
     render();
   }, err=>{
     console.error("Errore connessione database", err);
+    logDebug('Firestore: ERRORE connessione - ' + (err && err.message ? err.message : err));
     dbDisponibile = false;
     if(!DB){ DB = defaultDB(); render(); }
     mostraAvvisoDb("Connessione al database persa: " + (err && err.message ? err.message : err));
@@ -561,6 +570,7 @@ let vistaClienteTab = "prenota";
 
 if(firebaseAuth){
   firebaseAuth.onAuthStateChanged(user=>{
+    logDebug('onAuthStateChanged: ' + (user ? ('utente rilevato uid='+user.uid) : 'nessun utente'));
     if(user){
       clienteAuth = {uid:user.uid, email:user.email};
     } else {
@@ -592,6 +602,7 @@ function renderCliente(){
   database caricato: ${DB ? 'sì' : 'NO'}<br>
   clienti nel database: ${DB && DB.clients ? DB.clients.length : 'n/d'}<br>
   copia locale disponibile: ${clienteRecordFallback ? ('sì, uid='+esc(clienteRecordFallback.authUid)) : 'no'}
+  <br><br>Sequenza eventi:<br>${debugLog.map(l=>esc(l)).join('<br>')}
   </div></div>`;
 
   let html = `<div class="appt-row" style="align-items:center;margin-bottom:6px;">
@@ -1259,16 +1270,20 @@ function attachHandlers(){
     const email = document.getElementById('reg-email').value.trim();
     const password = document.getElementById('reg-password').value;
     if(!nome || !telefono || !email || !password){ clienteAuthErr = "Compila tutti i campi."; render(); return; }
+    logDebug('Registrazione: invio richiesta a Firebase Auth per ' + email);
     firebaseAuth.createUserWithEmailAndPassword(email, password).then(cred=>{
+      logDebug('Registrazione: risposta OK, uid=' + cred.user.uid + ' - creo il profilo');
       const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO()};
       clienteRecordFallback = nuovoCliente;
       DB.clients.push(nuovoCliente);
       log(`Nuova cliente registrata: ${nome}`);
       clienteAuth = {uid:cred.user.uid, email:cred.user.email};
       clienteAuthErr = null;
+      logDebug('Registrazione: profilo creato in memoria, salvo e ridisegno');
       saveDB();
       render();
     }).catch(err=>{
+      logDebug('Registrazione: ERRORE - ' + err.code + ' ' + err.message);
       clienteAuthErr = traduciErroreAuth(err.code);
       render();
     });
@@ -1278,11 +1293,14 @@ function attachHandlers(){
     const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
     if(!email || !password){ clienteAuthErr = "Inserisci email e password."; render(); return; }
+    logDebug('Login: invio richiesta a Firebase Auth per ' + email);
     firebaseAuth.signInWithEmailAndPassword(email, password).then(cred=>{
+      logDebug('Login: risposta OK, uid=' + cred.user.uid);
       clienteAuth = {uid:cred.user.uid, email:cred.user.email};
       clienteAuthErr = null;
       render();
     }).catch(err=>{
+      logDebug('Login: ERRORE - ' + err.code + ' ' + err.message);
       clienteAuthErr = traduciErroreAuth(err.code);
       render();
     });
