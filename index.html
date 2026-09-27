@@ -153,6 +153,42 @@ a.btn{display:inline-block;text-decoration:none;}
   padding:10px 13px;border-radius:var(--r-sm);margin-bottom:14px;
 }
 .notice.soft{background:#f4eef1;border-color:var(--line);color:var(--muted);}
+
+.cal-trigger{
+  width:100%;padding:11px 14px;border:1.5px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);cursor:pointer;font-size:14.5px;color:var(--ink);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;
+}
+.cal-trigger:hover{border-color:var(--pink);}
+.cal-trigger.placeholder{color:var(--muted);}
+.cal-trigger .cal-icon{color:var(--pink);flex-shrink:0;}
+.cal-overlay{
+  position:fixed;inset:0;background:rgba(40,20,30,0.45);z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.cal-popup{
+  background:var(--paper);border-radius:var(--r-lg);box-shadow:var(--shadow-float);
+  width:100%;max-width:360px;padding:22px;
+}
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.cal-titolo{font-family:'Fraunces',Georgia,serif;font-size:19px;color:var(--ink);text-transform:capitalize;}
+.cal-nav{
+  background:var(--pink-soft);border:none;border-radius:50%;width:36px;height:36px;
+  font-size:19px;color:var(--pink-deep);cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+.cal-nav:hover{background:var(--pink);color:#fff;}
+.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11.5px;color:var(--muted);margin-bottom:8px;font-weight:600;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+.cal-day{
+  aspect-ratio:1;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;font-size:14.5px;color:var(--ink);cursor:pointer;
+}
+.cal-day:hover:not(.disabled):not(.empty){background:var(--pink-soft);}
+.cal-day.disabled{color:var(--line);cursor:not-allowed;}
+.cal-day.empty{cursor:default;}
+.cal-day.today{border:1.5px solid var(--pink);font-weight:600;}
+.cal-day.selected{background:var(--pink);color:#fff;font-weight:600;}
+.cal-footer{margin-top:14px;text-align:right;}
 .empty{color:var(--muted);font-size:13.5px;padding:24px 4px;text-align:center;}
 
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -200,6 +236,7 @@ table.simple th{color:var(--muted);font-weight:600;font-size:11px;text-transform
   animation:svcPanelIn 0.12s ease-out;
 }
 @keyframes svcPanelIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.svc-hint{font-size:11.5px;color:var(--muted);padding:2px 10px 8px;line-height:1.4;}
 .svc-cat-label{
   font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:12.5px;color:var(--pink-deep);
   padding:10px 10px 5px;
@@ -291,6 +328,7 @@ nav.bottomnav button.active svg{stroke:var(--pink-deep);}
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" onerror="window.__fbLoadError=true"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" onerror="window.__fbLoadError=true"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" onerror="window.__fbLoadError=true"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.3/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -436,6 +474,27 @@ const DEFAULT_PROS = [
 ];
 
 const PUNTI_PER_EURO = 1; // punti fedeltà guadagnati per ogni euro speso — provvisorio, da confermare
+const PUNTI_REGISTRAZIONE = 50; // bonus una tantum alla creazione dell'account
+const PUNTI_RECENSIONE = 30; // bonus una tantum quando lo staff conferma una recensione lasciata
+const PUNTI_REFERRAL = 100; // bonus a chi porta un'amica, assegnato al primo appuntamento completato dell'amica
+const PUNTI_COMPLEANNO = 50; // bonus una tantum all'anno, il giorno del compleanno
+const GOOGLE_REVIEW_LINK = "https://g.page/r/CTmI_ziDM1XlEBM/review";
+
+function generaCodiceUnico(prefisso){
+  const caratteri = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // esclude 0/O e 1/I per evitare ambiguità
+  let codice;
+  do {
+    let suffisso = "";
+    for(let i=0;i<6;i++) suffisso += caratteri[Math.floor(Math.random()*caratteri.length)];
+    codice = prefisso+"-"+suffisso;
+  } while(
+    (DB.clients||[]).some(c=>c.codiceReferral===codice) ||
+    (DB.buoni||[]).some(b=>b.codice===codice)
+  );
+  return codice;
+}
+function generaCodiceReferralUnico(){ return generaCodiceUnico("NIMA"); }
+function generaCodiceBuonoUnico(){ return generaCodiceUnico("NIMA"); }
 // Premi confermati dal salone
 const DEFAULT_PREMI = [
   {id:"pr1", nome:"Sconto 5€ sul prossimo servizio", puntiRichiesti:75},
@@ -500,7 +559,10 @@ function defaultDB(){
     adminPassword: "nima2024",
     premi: DEFAULT_PREMI,
     magazzino: [], // {id, nome, categoria, prezzo, quantita, scorta}
-    spesa: [] // {id, testo, richiestoDa, data}
+    spesa: [], // {id, testo, richiestoDa, data}
+    chiusure: [], // {data, motivo}
+    buoni: [], // {codice, clienteId, clienteNome, premioNome, puntiSpesi, creato, scadenza, stato}
+    promo: [] // {id, nome, dataInizio, dataFine, area, serviceIds, tipoSconto, valoreSconto, pagamentoObbligatorio, moltiplicatorePunti, attiva}
   };
 }
 
@@ -523,6 +585,10 @@ function loadDB(){
       if(!DB.premi) DB.premi = DEFAULT_PREMI; // documenti creati prima dei premi fedeltà
       if(!DB.magazzino) DB.magazzino = []; // documenti creati prima del magazzino
       if(!DB.spesa) DB.spesa = []; // documenti creati prima della lista della spesa
+      if(!DB.chiusure) DB.chiusure = []; // documenti creati prima delle chiusure straordinarie
+      if(!DB.buoni) DB.buoni = []; // documenti creati prima dei buoni
+      if(!DB.promo) DB.promo = []; // documenti creati prima delle promozioni
+      (DB.clients||[]).forEach(c=>{ if(!c.codiceReferral) c.codiceReferral = generaCodiceReferralUnico(); }); // clienti create prima del referral
       logDebug('Firestore: dati ricevuti, clienti nel documento=' + (DB.clients?DB.clients.length:'n/d'));
     } else {
       DB = defaultDB();
@@ -578,6 +644,37 @@ function adessoLocaleISO(){
 function adessoISO(){ return new Date().toISOString(); }
 
 function getService(id){ return DB.services.find(s=>s.id===id); }
+function getServizi(ids){ return (ids||[]).map(id=>getService(id)).filter(Boolean); }
+function durataTotale(servizi){ return servizi.reduce((tot,s)=>tot+(s.durata||0),0); }
+function prezzoTotale(servizi){ return servizi.reduce((tot,s)=>tot+(s.prezzo||0),0); }
+function nomiServizi(servizi){ return servizi.length ? servizi.map(s=>s.name).join(' + ') : 'Servizio'; }
+function serviziAppt(a){
+  if(a.serviceIds && a.serviceIds.length) return getServizi(a.serviceIds);
+  const s = getService(a.serviceId);
+  return s ? [s] : [];
+}
+
+function promoAttivaOggi(promoObj){
+  if(!promoObj.attiva) return false;
+  const oggi = oggiISO();
+  return promoObj.dataInizio<=oggi && oggi<=promoObj.dataFine;
+}
+function promoCoprivaServizio(promoObj, servizio){
+  if(promoObj.area!=="tutte" && promoObj.area!==servizio.area) return false;
+  if(promoObj.serviceIds && promoObj.serviceIds.length) return promoObj.serviceIds.includes(servizio.id);
+  return true; // nessuna lista specifica = tutti i servizi dell'area
+}
+function promoApplicabile(servizi){
+  if(!servizi.length) return null;
+  const attive = (DB.promo||[]).filter(promoAttivaOggi);
+  return attive.find(pr => servizi.every(s=>promoCoprivaServizio(pr, s))) || null;
+}
+function prezzoConPromo(servizi, promoObj){
+  const base = prezzoTotale(servizi);
+  if(!promoObj) return base;
+  if(promoObj.tipoSconto==="percentuale") return Math.max(0, Math.round(base*(1-promoObj.valoreSconto/100)*100)/100);
+  return Math.max(0, base - promoObj.valoreSconto);
+}
 function getPro(id){ return DB.pros.find(p=>p.id===id); }
 function nomeApptCliente(a){
   if(a.ospite) return a.ospite.nome;
@@ -597,6 +694,7 @@ function findOrCreateClient(nome, telefono){
 }
 
 function orarioDisponibile(dataISO){
+  if((DB.chiusure||[]).some(ch=>ch.data===dataISO)) return null;
   const giorno = new Date(dataISO+"T00:00:00").getDay();
   return ORARI[giorno] || null;
 }
@@ -633,6 +731,20 @@ function generaSlotEsteso(dataISO, durataMin){
   return slotDaFasce(orarioEsteso(dataISO), durataMin);
 }
 
+function offsetSettimanaPerData(dataISO){
+  const lunediDi = (date)=>{
+    const giorno = date.getDay();
+    const diff = giorno===0 ? -6 : 1-giorno;
+    const l = new Date(date);
+    l.setDate(date.getDate()+diff);
+    l.setHours(0,0,0,0);
+    return l;
+  };
+  const lunediOggi = lunediDi(new Date());
+  const lunediScelto = lunediDi(new Date(dataISO+"T00:00:00"));
+  return Math.round((lunediScelto - lunediOggi) / (7*24*60*60*1000));
+}
+
 function slotOccupato(proId, dataISO, ora, durataMin, escludiApptId){
   const inizioNuovo = timeToMin(ora);
   const fineNuovo = inizioNuovo + durataMin;
@@ -640,9 +752,9 @@ function slotOccupato(proId, dataISO, ora, durataMin, escludiApptId){
     if(a.id===escludiApptId) return false;
     if(a.proId!==proId || a.data!==dataISO) return false;
     if(a.stato==="Annullato") return false;
-    const s = getService(a.serviceId);
+    const s = serviziAppt(a);
     const inizioA = timeToMin(a.ora);
-    const fineA = inizioA + (s? s.durata:30);
+    const fineA = inizioA + (s.length ? durataTotale(s) : 30);
     return inizioNuovo < fineA && fineNuovo > inizioA;
   });
 }
@@ -652,12 +764,41 @@ function aggiornaStatiAutomatici(){
   const oraAttuale = new Date();
   DB.appts.forEach(a=>{
     if(a.stato!=="Confermato") return;
-    const s = getService(a.serviceId);
-    const durata = s? s.durata: 30;
+    const s = serviziAppt(a);
+    const durata = s.length ? durataTotale(s) : 30;
     const fine = new Date(a.data+"T"+a.ora+":00");
     fine.setMinutes(fine.getMinutes()+durata+10); // margine tecnico 10 min
-    if(oraAttuale > fine){ a.stato = "Completato"; }
+    if(oraAttuale > fine){ a.stato = "Completato"; verificaBonusReferral(a); }
   });
+  verificaCompleanni();
+}
+
+function verificaCompleanni(){
+  const oggi = new Date();
+  const meseOggi = oggi.getMonth()+1, giornoOggi = oggi.getDate(), annoOggi = oggi.getFullYear();
+  (DB.clients||[]).forEach(c=>{
+    if(!c.dataNascita) return;
+    const parti = c.dataNascita.split('-').map(Number);
+    const m = parti[1], g = parti[2];
+    if(m===meseOggi && g===giornoOggi && c.ultimoAnnoCompleannoBonus!==annoOggi){
+      c.punti = (c.punti||0) + PUNTI_COMPLEANNO;
+      c.ultimoAnnoCompleannoBonus = annoOggi;
+      log(`+${PUNTI_COMPLEANNO} punti compleanno a ${c.nome} 🎂`);
+    }
+  });
+}
+
+function verificaBonusReferral(a){
+  if(a.ospite) return; // gli ospiti non hanno un account cliente
+  const cliente = DB.clients.find(c=>c.id===a.clienteId);
+  if(!cliente || !cliente.riferitoDa || cliente.puntiReferralAssegnati) return;
+  const completatiPrecedenti = DB.appts.filter(x=>x.clienteId===cliente.id && x.stato==="Completato" && x.id!==a.id);
+  if(completatiPrecedenti.length>0) return; // non è il primo appuntamento completato
+  const referrer = DB.clients.find(c=>c.id===cliente.riferitoDa);
+  if(!referrer) return;
+  referrer.punti = (referrer.punti||0) + PUNTI_REFERRAL;
+  cliente.puntiReferralAssegnati = true;
+  log(`+${PUNTI_REFERRAL} punti referral a ${referrer.nome} per aver portato ${cliente.nome}`);
 }
 
 function calcolaAcconto(prezzo){ return Math.round(prezzo*0.50*100)/100; }
@@ -683,6 +824,7 @@ function render(){
     if(currentRole==="professionista") app.innerHTML = renderProfessionista();
     if(currentRole==="admin") app.innerHTML = renderAdmin();
   }
+  if(calendarioAperto) app.innerHTML += renderCalendarioPersonalizzato();
   document.getElementById('footerNote').innerHTML = renderFooterLinks();
   attachHandlers();
   if(focusInfo){
@@ -701,7 +843,7 @@ document.getElementById('roleNav').addEventListener('click', (e)=>{
   if(!btn) return;
   currentRole = btn.dataset.role;
   document.querySelectorAll('#roleNav button').forEach(b=>b.classList.toggle('active', b===btn));
-  bookingState = {area:null, serviceId:null, proId:null, data:null, ora:null};
+  bookingState = {area:null, serviceIds:[], proId:null, data:null, ora:null};
   staffBooking = null;
   render();
 });
@@ -721,10 +863,17 @@ document.addEventListener('click', (e)=>{
       render();
     }
   }
+  if(sbServizioDropdownAperto){
+    const box3 = document.getElementById('sb-svc-select');
+    if(box3 && !box3.contains(e.target)){
+      sbServizioDropdownAperto = false;
+      render();
+    }
+  }
 });
 
 /* ====================== AREA CLIENTE ====================== */
-let bookingState = {area:null, serviceId:null, proId:null, data:null, ora:null};
+let bookingState = {area:null, serviceIds:[], proId:null, data:null, ora:null};
 let servizioDropdownAperto = false;
 let clienteAuth = null; // {uid, email} quando la cliente ha fatto login
 let clienteRecord = null; // record collegato in DB.clients
@@ -732,6 +881,7 @@ let clienteRecordFallback = null; // copia locale del profilo appena creato, usa
 let clienteAuthModo = "accedi"; // "accedi" | "registrati"
 let clienteAuthErr = null;
 let vistaClienteTab = "prenota";
+let profiloClienteMsg = null;
 
 if(firebaseAuth){
   firebaseAuth.onAuthStateChanged(user=>{
@@ -783,20 +933,81 @@ function renderCliente(){
     <button data-tab="prenota" class="${vistaClienteTab==='prenota'?'active':''}">Prenota</button>
     <button data-tab="storico" class="${vistaClienteTab==='storico'?'active':''}">I miei appuntamenti</button>
     <button data-tab="premi" class="${vistaClienteTab==='premi'?'active':''}">Premi</button>
+    <button data-tab="profilo" class="${vistaClienteTab==='profilo'?'active':''}">Profilo</button>
   </div>`;
 
   if(vistaClienteTab==="prenota") html += renderPrenotazione();
   else if(vistaClienteTab==="premi") html += renderPremiCliente();
+  else if(vistaClienteTab==="profilo") html += renderProfiloCliente();
   else html += renderStoricoCliente();
 
   return html;
+}
+
+function renderProfiloCliente(){
+  const c = clienteRecord;
+  const [annoNasc, meseNasc, giornoNasc] = c.dataNascita ? c.dataNascita.split('-').map(Number) : [null,null,null];
+  const nomiMesi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  const annoCorrente = new Date().getFullYear();
+  return `<h2 class="section-title">Il mio profilo</h2>
+  <div class="card">
+    <div class="field"><label>Nome e cognome</label><input type="text" id="prof-nome" value="${esc(c.nome)}"></div>
+    <div class="field"><label>Telefono</label><input type="tel" id="prof-telefono" value="${esc(c.telefono||'')}"></div>
+    <div class="field"><label>Email</label><input type="text" value="${esc(c.email||'')}" disabled style="opacity:0.55;"></div>
+    <div class="field"><label>🎂 Data di nascita</label>
+      <div class="actions-row" style="margin-top:0;">
+        <select id="prof-nascita-giorno" style="flex:0.8;">
+          <option value="">Giorno</option>
+          ${Array.from({length:31},(_,i)=>i+1).map(g=>`<option value="${g}" ${giornoNasc===g?'selected':''}>${g}</option>`).join('')}
+        </select>
+        <select id="prof-nascita-mese" style="flex:1.3;">
+          <option value="">Mese</option>
+          ${nomiMesi.map((m,i)=>`<option value="${i+1}" ${meseNasc===i+1?'selected':''}>${m}</option>`).join('')}
+        </select>
+        <select id="prof-nascita-anno" style="flex:1;">
+          <option value="">Anno</option>
+          ${Array.from({length:90},(_,i)=>annoCorrente-i).map(a=>`<option value="${a}" ${annoNasc===a?'selected':''}>${a}</option>`).join('')}
+        </select>
+      </div>
+      <div class="appt-meta" style="margin-top:4px;">Ricevi ${PUNTI_COMPLEANNO} punti bonus il giorno del tuo compleanno 🎉</div>
+    </div>
+    <div class="field"><label>Indirizzo</label><input type="text" id="prof-indirizzo" value="${esc(c.indirizzo||'')}" placeholder="Via, numero civico"></div>
+    <div class="field"><label>CAP</label><input type="text" id="prof-cap" value="${esc(c.cap||'')}" placeholder="Es. 84092"></div>
+    <div class="field"><label>Città</label><input type="text" id="prof-citta" value="${esc(c.citta||'')}" placeholder="Es. Bellizzi"></div>
+    ${profiloClienteMsg ? `<div class="notice soft">${esc(profiloClienteMsg)}</div>` : ''}
+    <div class="actions-row"><button class="btn" id="btn-salva-profilo">Salva modifiche</button></div>
+  </div>`;
 }
 
 function renderPremiCliente(){
   const punti = clienteRecord.punti||0;
   const premi = (DB.premi||DEFAULT_PREMI).slice().sort((a,b)=>a.puntiRichiesti-b.puntiRichiesti);
   let html = `<h2 class="section-title">Catalogo premi</h2>
-  <div class="appt-meta" style="margin-bottom:12px;">Guadagni ${PUNTI_PER_EURO} punto/i per ogni euro speso tramite l'app. Per riscattare un premio, mostra questa pagina in salone.</div>`;
+  <div class="appt-meta" style="margin-bottom:12px;">Guadagni ${PUNTI_PER_EURO} punto/i per ogni euro speso tramite l'app. Per riscattare un premio, mostra questa pagina in salone.</div>
+  <div class="card" style="margin-bottom:14px;">
+    <strong>Lasciaci una recensione ⭐</strong>
+    <div class="appt-meta" style="margin-top:4px;">Raccontaci la tua esperienza su Google: dopo la conferma dello staff, riceverai ${PUNTI_RECENSIONE} punti in regalo.</div>
+    <div class="actions-row" style="margin-top:8px;"><a class="btn small" href="${GOOGLE_REVIEW_LINK}" target="_blank" rel="noopener">Scrivi una recensione</a></div>
+  </div>
+  <div class="card" style="margin-bottom:14px;">
+    <strong>Porta un'amica</strong>
+    <div class="appt-meta" style="margin-top:4px;">Regala il tuo codice: quando la tua amica si registra e completa il primo appuntamento, ricevi ${PUNTI_REFERRAL} punti.</div>
+    <div style="font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--pink-deep);margin-top:8px;letter-spacing:0.5px;">${esc(clienteRecord.codiceReferral||'—')}</div>
+  </div>`;
+  const miBuoni = (DB.buoni||[]).filter(bu=>bu.clienteId===clienteRecord.id).sort((a,b)=> a.creato<b.creato?1:-1);
+  if(miBuoni.length){
+    html += `<h2 class="section-title">I miei buoni</h2>`;
+    miBuoni.forEach(bu=>{
+      const usato = bu.stato==="utilizzato";
+      html += `<div class="card" style="${usato?'opacity:0.55;':''}">
+        <div class="appt-row">
+          <div><strong>${esc(bu.premioNome)}</strong><div class="appt-meta">Scadenza: ${fmtData(bu.scadenza)}</div></div>
+          <span class="badge ${usato?'muted':'ok'}">${usato?'Utilizzato':'Disponibile'}</span>
+        </div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-size:17px;color:var(--pink-deep);margin-top:6px;letter-spacing:0.5px;">${esc(bu.codice)}</div>
+      </div>`;
+    });
+  }
   premi.forEach(p=>{
     const ok = punti >= p.puntiRichiesti;
     html += `<div class="appt-row" style="padding:12px 14px;border:1.5px solid ${ok?'var(--pink)':'var(--line)'};border-radius:var(--r-md);margin-bottom:8px;${ok?'background:var(--pink-soft);':'opacity:0.65;'}">
@@ -819,6 +1030,7 @@ function renderClienteAuthForm(){
     <div class="field"><label>Telefono</label><input type="tel" id="reg-telefono" placeholder="Es. 333 1234567"></div>
     <div class="field"><label>Email</label><input type="text" id="reg-email" placeholder="tuaemail@esempio.it"></div>
     <div class="field"><label>Password (almeno 6 caratteri)</label><input type="password" id="reg-password" placeholder="••••••••"></div>
+    <div class="field"><label>Codice di un'amica (facoltativo)</label><input type="text" id="reg-referral" placeholder="Es. NIMA-A7K92X"></div>
     ${clienteAuthErr ? `<div class="warn-box">${esc(clienteAuthErr)}</div>` : ''}
     <div class="actions-row"><button class="btn" id="btn-cliente-registrati">Crea account</button></div>`;
   } else {
@@ -863,34 +1075,45 @@ function renderPrenotazione(){
     }
     const servizi = DB.services.filter(s=>s.area===bookingState.area);
     const categorie = [...new Set(servizi.map(s=>s.categoria||bookingState.area))];
-    const servizioCorrente = bookingState.serviceId ? servizi.find(s=>s.id===bookingState.serviceId) : null;
-    html += `<div class="field"><label>Servizio</label>
+    const serviziScelti = getServizi(bookingState.serviceIds);
+    html += `<div class="field"><label>Servizio${serviziScelti.length>1?'i':''}</label>
       <div class="svc-select ${servizioDropdownAperto?'open':''}" id="svc-select">
         <div class="svc-select-trigger" id="svc-select-trigger">
-          ${servizioCorrente
-            ? `<div class="chosen"><div class="nome">${servizioCorrente.name}</div><div class="dettagli">${describePrezzoServizio(servizioCorrente)}</div></div>`
-            : `<span class="placeholder">Seleziona un servizio</span>`}
+          ${serviziScelti.length===1
+            ? `<div class="chosen"><div class="nome">${serviziScelti[0].name}</div><div class="dettagli">${describePrezzoServizio(serviziScelti[0])}</div></div>`
+            : serviziScelti.length>1
+            ? `<div class="chosen"><div class="nome">${nomiServizi(serviziScelti)}</div><div class="dettagli">${durataTotale(serviziScelti)} min — €${prezzoTotale(serviziScelti)} totali</div></div>`
+            : `<span class="placeholder">Seleziona uno o più servizi</span>`}
           <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
         ${servizioDropdownAperto ? `<div class="svc-panel">
+          <div class="svc-hint">Puoi scegliere più servizi da fare nella stessa visita: la durata si somma da sola.</div>
           ${categorie.map(cat=>`<div class="svc-cat-label">${cat}</div>${servizi.filter(s=>(s.categoria||bookingState.area)===cat).map(s=>
-            `<div class="svc-opt ${bookingState.serviceId===s.id?'selected':''}" data-scegli-servizio="${s.id}">
+            `<div class="svc-opt ${bookingState.serviceIds.includes(s.id)?'selected':''}" data-scegli-servizio="${s.id}">
               <span class="nome">${s.name}</span><span class="prezzo">${describePrezzoServizio(s)}</span>
             </div>`).join('')}`).join('')}
+          <div class="actions-row" style="margin-top:8px;padding:0 4px;"><button class="btn small" id="btn-chiudi-svc-select">Fatto</button></div>
         </div>` : ''}
       </div>
     </div>`;
   }
 
-  const servizioSel = bookingState.serviceId ? getService(bookingState.serviceId) : null;
+  const serviziSel = getServizi(bookingState.serviceIds);
+  const soloConcordare = serviziSel.length===1 && serviziSel[0].concordare;
 
-  if(servizioSel && servizioSel.concordare){
+  if(soloConcordare){
     html += `<div class="notice">Questo servizio è "da concordare" e non si prenota online: prezzo, durata e disponibilità vanno definiti direttamente con il salone.</div>
     <div class="actions-row"><a class="btn" href="https://wa.me/393784301155" target="_blank" rel="noopener">Scrivi su WhatsApp</a></div></div>`;
     return html;
   }
 
-  if(servizioSel){
+  const promoAttiva = promoApplicabile(serviziSel);
+  if(promoAttiva && serviziSel.length){
+    const prezzoScontato = prezzoConPromo(serviziSel, promoAttiva);
+    html += `<div class="notice soft" style="border-color:var(--pink);background:var(--pink-soft);">🎉 Promo attiva: <strong>${esc(promoAttiva.nome)}</strong> — prezzo scontato €${prezzoScontato} (invece di €${prezzoTotale(serviziSel)})${promoAttiva.moltiplicatorePunti>1?` · punti x${promoAttiva.moltiplicatorePunti}`:''}</div>`;
+  }
+
+  if(serviziSel.length){
     const pros = DB.pros.filter(p=>p.aree.includes(bookingState.area));
     html += `<div class="field"><label>Professionista</label><select id="sel-pro">
       <option value="">Nessuna preferenza / prima disponibile</option>
@@ -898,30 +1121,37 @@ function renderPrenotazione(){
     </select></div>`;
   }
 
-  if(servizioSel){
+  if(serviziSel.length){
     html += `<div class="field"><label>Data</label>
-      <input type="date" id="sel-data" min="${oggiISO()}" value="${bookingState.data||''}"></div>`;
+      <div class="cal-trigger ${!bookingState.data?'placeholder':''}" data-apri-calendario="sel-data" data-min="${oggiISO()}" data-valore="${bookingState.data||''}">
+        <span>${bookingState.data ? fmtData(bookingState.data) : 'Scegli una data'}</span><span class="cal-icon">📅</span>
+      </div></div>`;
   }
 
-  if(bookingState.data && servizioSel){
+  if(bookingState.data && serviziSel.length){
     const fasce = orarioDisponibile(bookingState.data);
+    const durataComplessiva = durataTotale(serviziSel);
     if(!fasce){
-      html += `<div class="notice soft">Il salone è chiuso in questa data. Scegli martedì–sabato.</div>`;
+      const chiusuraStraord = (DB.chiusure||[]).find(ch=>ch.data===bookingState.data);
+      html += `<div class="notice soft">${chiusuraStraord ? `Il salone è chiuso in questa data${chiusuraStraord.motivo?' — '+esc(chiusuraStraord.motivo):''}.` : 'Il salone è chiuso in questa data. Scegli martedì–sabato.'}</div>`;
     } else {
       let proTarget = bookingState.proId || (DB.pros.find(p=>p.aree.includes(bookingState.area))||{}).id;
-      const slots = generaSlot(bookingState.data, servizioSel.durata);
-      html += `<div class="field"><label>Orario disponibile</label><div class="slot-grid">`;
+      const slots = generaSlot(bookingState.data, durataComplessiva);
+      html += `<div class="field"><label>Orario disponibile${serviziSel.length>1?` (${durataComplessiva} min totali)`:''}</label><div class="slot-grid">`;
       slots.forEach(ora=>{
-        const occ = proTarget ? slotOccupato(proTarget, bookingState.data, ora, servizioSel.durata, null) : false;
+        const occ = proTarget ? slotOccupato(proTarget, bookingState.data, ora, durataComplessiva, null) : false;
         html += `<div class="slot ${occ?'taken':''} ${bookingState.ora===ora?'selected':''}" data-ora="${occ?'':ora}">${ora}</div>`;
       });
       html += `</div></div>`;
     }
   }
 
-  if(bookingState.ora && bookingState.data && servizioSel){
-    if(servizioSel.prezzo > 30){
-      html += `<div class="warn-box">Servizio oltre €30: alla conferma dovrai scegliere tra un acconto del 50% (€${calcolaAcconto(servizioSel.prezzo)}) oppure il saldo intero subito (€${servizioSel.prezzo}).</div>`;
+  if(bookingState.ora && bookingState.data && serviziSel.length){
+    const prezzoComplessivo = prezzoConPromo(serviziSel, promoAttiva);
+    if(promoAttiva && promoAttiva.pagamentoObbligatorio){
+      html += `<div class="warn-box">Questa promozione richiede il pagamento online completo (€${prezzoComplessivo}) per confermare la prenotazione.</div>`;
+    } else if(prezzoComplessivo > 30){
+      html += `<div class="warn-box">Totale oltre €30: alla conferma dovrai scegliere tra un acconto del 50% (€${calcolaAcconto(prezzoComplessivo)}) oppure il saldo intero subito (€${prezzoComplessivo}).</div>`;
     }
     html += `<div class="actions-row"><button class="btn" id="btn-conferma-prenota">Continua e conferma</button></div>`;
   }
@@ -943,21 +1173,21 @@ function renderStoricoCliente(){
 
   let html = `<h2 class="section-title">I tuoi appuntamenti</h2>`;
   miei.forEach(a=>{
-    const s = getService(a.serviceId); const p = getPro(a.proId);
+    const servizi = serviziAppt(a); const p = getPro(a.proId);
     const futuro = (a.data+"T"+a.ora) >= adessoLocaleISO();
     const oreAllAppuntamento = (new Date(a.data+"T"+a.ora+":00") - new Date()) / (1000*60*60);
     const entro48 = oreAllAppuntamento >= 48;
     const pagamentoDaCompletare = a.pagamento && (a.pagamento.stato==="in_attesa" || a.pagamento.stato==="fallito") && !a.pagatoManuale && a.stato!=="Annullato";
-    const pagamentoFacoltativo = !a.pagamento && !a.pagatoManuale && a.stato!=="Annullato" && s;
+    const pagamentoFacoltativo = !a.pagamento && !a.pagatoManuale && a.stato!=="Annullato" && servizi.length;
     html += `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
       <div class="appt-row">
-        <div><strong>${s?s.name:'Servizio'}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${p?p.nome:''}</div></div>
+        <div><strong>${nomiServizi(servizi)}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${p?p.nome:''}</div></div>
         <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
       </div>
       <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
       ${pagamentoDaCompletare ? `<div class="actions-row"><button class="btn small" data-riprova-pagamento="${a.id}">Paga €${a.pagamento.importo}</button></div>` : ''}
       ${pagamentoFacoltativo ? `<div class="appt-meta" style="margin-top:6px;">Pagamento non obbligatorio: puoi pagare online in anticipo oppure direttamente in salone.</div>
-      <div class="actions-row"><button class="btn ghost small" data-paga-facoltativo="${a.id}">Paga online — €${s.prezzo}</button></div>` : ''}
+      <div class="actions-row"><button class="btn ghost small" data-paga-facoltativo="${a.id}">Paga online — €${prezzoTotale(servizi)}</button></div>` : ''}
       ${futuro && a.stato==="Confermato" ? `
       ${!entro48 && a.pagamento ? `<div class="warn-box">Sei entro le 48 ore dall'appuntamento: annullando, l'acconto/importo versato non viene rimborsato.</div>` : ''}
       <div class="actions-row">
@@ -1002,14 +1232,17 @@ function apptCompletamentePagato(a){
 function sincronizzaPuntiFedelta(a){
   if(a.ospite) return; // gli ospiti non hanno un account cliente su cui accumulare punti
   const cliente = DB.clients.find(c=>c.id===a.clienteId);
-  const s = getService(a.serviceId);
-  if(!cliente || !s) return;
+  const servizi = serviziAppt(a);
+  if(!cliente || !servizi.length) return;
   const completo = apptCompletamentePagato(a);
-  const punti = Math.floor(s.prezzo * PUNTI_PER_EURO);
+  const prezzoBase = (a.promoId && a.prezzoPromo!=null) ? a.prezzoPromo : prezzoTotale(servizi);
+  const promoObj = a.promoId ? (DB.promo||[]).find(p=>p.id===a.promoId) : null;
+  const moltiplicatore = promoObj ? (promoObj.moltiplicatorePunti||1) : 1;
+  const punti = Math.floor(prezzoBase * PUNTI_PER_EURO * moltiplicatore);
   if(completo && !a.puntiAssegnati){
     cliente.punti = (cliente.punti||0) + punti;
     a.puntiAssegnati = true;
-    if(punti>0) log(`+${punti} punti fedeltà a ${cliente.nome} (${s.name} del ${a.data})`);
+    if(punti>0) log(`+${punti} punti fedeltà a ${cliente.nome} (${nomiServizi(servizi)} del ${a.data})`);
   } else if(!completo && a.puntiAssegnati){
     cliente.punti = Math.max(0, (cliente.punti||0) - punti);
     a.puntiAssegnati = false;
@@ -1023,6 +1256,12 @@ let proLoginErr = null;
 let apptSelezionataNota = null;
 let settimanaOffset = 0; // 0 = settimana corrente, +1 = prossima, -1 = precedente...
 let giornoSettimanaEspanso = null; // data ISO del giorno aperto nel riepilogo settimanale, o null
+let calendarioSettimanaAperto = false;
+let calendarioAperto = null; // null | {campo, min, valoreAttuale, mese: 'YYYY-MM-01'}
+let chiusureAperto = false;
+let nuovaChiusuraData = null;
+let buonoVerificaRisultato = null;
+let promoForm = null;
 
 function renderProfessionista(){
   if(!proAuth) return renderProLogin();
@@ -1077,8 +1316,16 @@ function renderProDashboard(){
   html += `<div class="actions-row" style="margin-top:-6px;">
     <button class="btn ghost small" id="btn-settimana-prev">← Settimana prima</button>
     <button class="btn ghost small" id="btn-settimana-next">Settimana dopo →</button>
+    <button class="btn ghost small" id="btn-calendario-settimana">📅 Calendario</button>
     ${settimanaOffset!==0 ? `<button class="btn ghost small" id="btn-settimana-oggi">↺ Settimana di oggi</button>` : ''}
   </div>`;
+  if(calendarioSettimanaAperto){
+    html += `<div class="field" style="margin-top:6px;max-width:220px;">
+      <div class="cal-trigger placeholder" data-apri-calendario="settimana" data-min="" data-valore="">
+        <span>Scegli una data</span><span class="cal-icon">📅</span>
+      </div>
+    </div>`;
+  }
   html += `<div class="card">`;
   giorniSettimana.forEach(data=>{
     const appts = DB.appts.filter(a=>a.proId===proAuth.id && a.data===data && a.stato!=="Annullato").sort((a,b)=> a.ora>b.ora?1:-1);
@@ -1141,11 +1388,11 @@ function getGiorniSettimana(offset){
 }
 
 function renderApptCardStaff(a){
-  const s = getService(a.serviceId); const c = a.ospite ? null : DB.clients.find(c=>c.id===a.clienteId);
+  const s = serviziAppt(a); const c = a.ospite ? null : DB.clients.find(c=>c.id===a.clienteId);
   const noteCliente = c ? c.note.filter(n=>n.area===a.area) : [];
   return `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
     <div class="appt-row">
-      <div><strong style="font-size:15.5px;">${a.ora} · ${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${s?s.name:''}${s?` · ${s.durata} min`:''}</div></div>
+      <div><strong style="font-size:15.5px;">${a.ora} · ${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${nomiServizi(s)}${s.length?` · ${durataTotale(s)} min`:''}</div></div>
       <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
     </div>
     <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
@@ -1226,16 +1473,17 @@ function apriPrenotazioneInterna(scope){
     telefono: "",
     email: "",
     area: scope.kind==="staff" ? getPro(scope.proId).aree[0] : null,
-    serviceId: null,
+    serviceIds: [],
     proId: scope.kind==="staff" ? scope.proId : null,
     data: null,
     ora: null,
     pagamentoScelta: "negozio"
   };
+  sbServizioDropdownAperto = false;
   render();
 }
 
-function chiudiPrenotazioneInterna(){ staffBooking = null; render(); }
+function chiudiPrenotazioneInterna(){ staffBooking = null; sbServizioDropdownAperto = false; render(); }
 
 function clientiFiltrati(query){
   const ordinati = DB.clients.slice().sort((a,b)=>a.nome.localeCompare(b.nome));
@@ -1251,7 +1499,6 @@ function clientiFiltrati(query){
 
 function renderPrenotazioneInterna(){
   const sb = staffBooking;
-  const isStaff = sb.scope.kind === "staff";
   let html = `<div class="card">
     <div class="appt-row"><strong>Nuovo appuntamento</strong><button class="btn ghost small" id="btn-chiudi-prenot-interna">Annulla</button></div>`;
 
@@ -1289,28 +1536,44 @@ function renderPrenotazioneInterna(){
     <div class="notice soft">Questa cliente non verrà salvata in "Clienti": l'appuntamento resta comunque in agenda.</div>`;
   }
 
-  // Area (solo admin può scegliere; per lo staff è fissa sulla propria)
-  if(!isStaff){
-    html += `<div class="field"><label>Area</label><select id="sb-area">
-      <option value="">Seleziona area...</option>
-      ${AREE.map(a=>`<option value="${a}" ${sb.area===a?'selected':''}>${a}</option>`).join('')}
-    </select></div>`;
-  }
+  // Area (scelta libera anche per lo staff: utile se risponde al telefono per un'altra professionista)
+  html += `<div class="field"><label>Area</label><select id="sb-area">
+    <option value="">Seleziona area...</option>
+    ${AREE.map(a=>`<option value="${a}" ${sb.area===a?'selected':''}>${a}</option>`).join('')}
+  </select></div>`;
 
   if(sb.area){
     const servizi = DB.services.filter(s=>s.area===sb.area);
     const categorie = [...new Set(servizi.map(s=>s.categoria||sb.area))];
-    html += `<div class="field"><label>Servizio</label><select id="sb-servizio">
-      <option value="">Seleziona servizio...</option>
-      ${categorie.map(cat=>`<optgroup label="${cat}">${servizi.filter(s=>(s.categoria||sb.area)===cat).map(s=>
-        `<option value="${s.id}" ${sb.serviceId===s.id?'selected':''}>${s.name} — ${describePrezzoServizio(s)}</option>`
-      ).join('')}</optgroup>`).join('')}
-    </select></div>`;
+    const serviziScelti = getServizi(sb.serviceIds);
+    html += `<div class="field"><label>Servizio${serviziScelti.length>1?'i':''}</label>
+      <div class="svc-select ${sbServizioDropdownAperto?'open':''}" id="sb-svc-select">
+        <div class="svc-select-trigger" id="sb-svc-select-trigger">
+          ${serviziScelti.length===1
+            ? `<div class="chosen"><div class="nome">${serviziScelti[0].name}</div><div class="dettagli">${describePrezzoServizio(serviziScelti[0])}</div></div>`
+            : serviziScelti.length>1
+            ? `<div class="chosen"><div class="nome">${nomiServizi(serviziScelti)}</div><div class="dettagli">${durataTotale(serviziScelti)} min — €${prezzoTotale(serviziScelti)} totali</div></div>`
+            : `<span class="placeholder">Seleziona uno o più servizi</span>`}
+          <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        ${sbServizioDropdownAperto ? `<div class="svc-panel">
+          <div class="svc-hint">Puoi selezionare più servizi da fare nella stessa visita: la durata si somma da sola.</div>
+          ${categorie.map(cat=>`<div class="svc-cat-label">${cat}</div>${servizi.filter(s=>(s.categoria||sb.area)===cat).map(s=>
+            `<div class="svc-opt ${sb.serviceIds.includes(s.id)?'selected':''}" data-sb-scegli-servizio="${s.id}">
+              <span class="nome">${s.name}</span><span class="prezzo">${describePrezzoServizio(s)}</span>
+            </div>`).join('')}`).join('')}
+          <div class="actions-row" style="margin-top:8px;padding:0 4px;"><button class="btn small" id="btn-chiudi-sb-svc-select">Fatto</button></div>
+        </div>` : ''}
+      </div>
+    </div>`;
   }
 
-  const servizioSel = sb.serviceId ? getService(sb.serviceId) : null;
+  const serviziSel = getServizi(sb.serviceIds);
+  const soloConcordareSb = serviziSel.length===1 && serviziSel[0].concordare;
+  const durataComplessivaSb = durataTotale(serviziSel);
+  const prezzoComplessivoSb = prezzoTotale(serviziSel);
 
-  if(servizioSel && !isStaff){
+  if(serviziSel.length){
     const pros = DB.pros.filter(p=>p.aree.includes(sb.area));
     html += `<div class="field"><label>Professionista</label><select id="sb-pro">
       <option value="">Seleziona professionista...</option>
@@ -1318,31 +1581,36 @@ function renderPrenotazioneInterna(){
     </select></div>`;
   }
 
-  if(servizioSel && sb.proId){
-    html += `<div class="field"><label>Data</label><input type="date" id="sb-data" value="${sb.data||''}"></div>`;
+  if(serviziSel.length && sb.proId){
+    html += `<div class="field"><label>Data</label>
+      <div class="cal-trigger ${!sb.data?'placeholder':''}" data-apri-calendario="sb-data" data-min="${oggiISO()}" data-valore="${sb.data||''}">
+        <span>${sb.data ? fmtData(sb.data) : 'Scegli una data'}</span><span class="cal-icon">📅</span>
+      </div>
+    </div>`;
   }
 
-  if(servizioSel && !servizioSel.concordare && sb.proId && sb.data){
+  if(serviziSel.length && !soloConcordareSb && sb.proId && sb.data){
     const fasce = orarioEsteso(sb.data);
     if(!fasce){
-      html += `<div class="notice soft">Il salone è chiuso in questa data.</div>`;
+      const chiusuraStraordSb = (DB.chiusure||[]).find(ch=>ch.data===sb.data);
+      html += `<div class="notice soft">Il salone è chiuso in questa data${chiusuraStraordSb && chiusuraStraordSb.motivo ? ' — '+esc(chiusuraStraordSb.motivo) : ''}.</div>`;
     } else {
-      const slots = generaSlotEsteso(sb.data, servizioSel.durata);
-      html += `<div class="field"><label>Orario</label><div class="slot-grid">`;
+      const slots = generaSlotEsteso(sb.data, durataComplessivaSb);
+      html += `<div class="field"><label>Orario${serviziSel.length>1?` (${durataComplessivaSb} min totali)`:''}</label><div class="slot-grid">`;
       slots.forEach(ora=>{
-        const occ = slotOccupato(sb.proId, sb.data, ora, servizioSel.durata, null);
+        const occ = slotOccupato(sb.proId, sb.data, ora, durataComplessivaSb, null);
         html += `<div class="slot ${occ?'taken':''} ${sb.ora===ora?'selected':''}" data-sb-ora="${occ?'':ora}">${ora}</div>`;
       });
       html += `</div></div>`;
     }
   }
 
-  if(servizioSel && !servizioSel.concordare && sb.ora){
+  if(serviziSel.length && !soloConcordareSb && sb.ora){
     html += `<div class="field"><label>Pagamento</label><select id="sb-pagamento">
       <option value="negozio" ${sb.pagamentoScelta==='negozio'?'selected':''}>Da incassare in negozio</option>
       <option value="online_sumup" ${sb.pagamentoScelta==='online_sumup'?'selected':''}>Incassato subito — SumUp (POS in negozio)</option>
       <option value="online_contanti" ${sb.pagamentoScelta==='online_contanti'?'selected':''}>Incassato subito — Contanti</option>
-      ${servizioSel.prezzo>30 ? `
+      ${prezzoComplessivoSb>30 ? `
       <option value="acconto_sumup" ${sb.pagamentoScelta==='acconto_sumup'?'selected':''}>Acconto 50% — SumUp (POS in negozio)</option>
       <option value="acconto_contanti" ${sb.pagamentoScelta==='acconto_contanti'?'selected':''}>Acconto 50% — Contanti</option>` : ''}
     </select></div>
@@ -1355,7 +1623,9 @@ function renderPrenotazioneInterna(){
 
 function confermaPrenotazioneInterna(){
   const sb = staffBooking;
-  const servizio = getService(sb.serviceId);
+  const servizi = getServizi(sb.serviceIds);
+  const durataComplessiva = durataTotale(servizi);
+  const prezzoComplessivo = prezzoTotale(servizi);
 
   let clienteId = null, ospite = null, nomeVisualizzato;
   if(sb.clienteMode==="esistente"){
@@ -1370,7 +1640,7 @@ function confermaPrenotazioneInterna(){
     nomeVisualizzato = nome;
   }
 
-  if(slotOccupato(sb.proId, sb.data, sb.ora, servizio.durata, null)){
+  if(slotOccupato(sb.proId, sb.data, sb.ora, durataComplessiva, null)){
     alert("Questo orario è appena stato occupato, scegline un altro.");
     render();
     return;
@@ -1385,17 +1655,18 @@ function confermaPrenotazioneInterna(){
   };
   if(sb.pagamentoScelta!=="negozio"){
     const m = metodoMap[sb.pagamentoScelta];
-    pagamento = {tipo:m.tipo, metodo:m.metodo, importo: m.tipo==="acconto" ? calcolaAcconto(servizio.prezzo) : servizio.prezzo, stato:"confermato"};
+    pagamento = {tipo:m.tipo, metodo:m.metodo, importo: m.tipo==="acconto" ? calcolaAcconto(prezzoComplessivo) : prezzoComplessivo, stato:"confermato"};
   }
 
+  const creatoDa = sb.scope.kind==="admin" ? "Admin" : ((getPro(sb.scope.proId)||{}).nome || "Staff");
   const appt = {
-    id: uid("a"), clienteId, ospite, area: sb.area, serviceId: sb.serviceId, proId: sb.proId,
+    id: uid("a"), clienteId, ospite, area: sb.area, serviceId: sb.serviceIds[0], serviceIds: sb.serviceIds.slice(), proId: sb.proId,
     data: sb.data, ora: sb.ora, stato: "Confermato", pagamento, creato: adessoISO(),
-    inseritoDaStaff: true
+    inseritoDaStaff: true, creatoDa
   };
   DB.appts.push(appt);
   sincronizzaPuntiFedelta(appt);
-  log(`Appuntamento inserito dallo staff: ${nomeVisualizzato} — ${servizio.name} il ${appt.data} ${appt.ora} con ${getPro(sb.proId).nome}`);
+  log(`Appuntamento inserito dallo staff: ${nomeVisualizzato} — ${nomiServizi(servizi)} il ${appt.data} ${appt.ora} con ${getPro(sb.proId).nome}`);
   saveDB();
   staffBooking = null;
   render();
@@ -1406,6 +1677,7 @@ let adminAuth = false;
 let adminLoginErr = null;
 let adminTab = "agenda";
 let magazzinoForm = null; // null | {id, nome, categoria, prezzo, quantita, scorta} — id null = nuovo prodotto
+let sbServizioDropdownAperto = false;
 let registraClienteForm = null; // null | {nome, telefono, email, password}
 let registraClienteErr = null;
 
@@ -1420,6 +1692,7 @@ function renderAdmin(){
     <button data-atab="clienti" class="${adminTab==='clienti'?'active':''}">Clienti</button>
     <button data-atab="magazzino" class="${adminTab==='magazzino'?'active':''}">Magazzino</button>
     <button data-atab="spesa" class="${adminTab==='spesa'?'active':''}">Spesa da fare</button>
+    <button data-atab="promo" class="${adminTab==='promo'?'active':''}">Promozioni</button>
     <button data-atab="stats" class="${adminTab==='stats'?'active':''}">Statistiche</button>
     <button data-atab="campagne" class="${adminTab==='campagne'?'active':''}">Campagne WhatsApp</button>
     <button data-atab="log" class="${adminTab==='log'?'active':''}">Log</button>
@@ -1430,6 +1703,7 @@ function renderAdmin(){
   if(adminTab==="clienti") html += renderAdminClienti();
   if(adminTab==="magazzino") html += renderAdminMagazzino();
   if(adminTab==="spesa") html += renderAdminSpesa();
+  if(adminTab==="promo") html += renderAdminPromo();
   if(adminTab==="stats") html += renderAdminStats();
   if(adminTab==="campagne") html += renderAdminCampagne();
   if(adminTab==="log") html += renderAdminLog();
@@ -1449,6 +1723,27 @@ function renderAdminLogin(){
 function renderAdminAgenda(){
   const tutti = DB.appts.slice().sort((a,b)=> (a.data+a.ora) < (b.data+b.ora) ? 1 : -1);
   let html = ``;
+
+  const prossimeChiusure = (DB.chiusure||[]).filter(ch=>ch.data>=oggiISO()).sort((a,b)=> a.data<b.data?-1:1);
+  html += `<div class="card">
+    <div class="appt-row"><strong>Giorni di chiusura</strong><button class="btn ghost small" id="btn-toggle-chiusure">${chiusureAperto?'Chiudi':'Gestisci'}</button></div>
+    ${chiusureAperto ? `
+      <div class="field"><label>Data da chiudere</label>
+        <div class="cal-trigger ${!nuovaChiusuraData?'placeholder':''}" data-apri-calendario="chiusura" data-min="${oggiISO()}" data-valore="${nuovaChiusuraData||''}">
+          <span>${nuovaChiusuraData ? fmtData(nuovaChiusuraData) : 'Scegli una data'}</span><span class="cal-icon">📅</span>
+        </div>
+      </div>
+      <div class="field"><input type="text" id="chiusura-motivo" placeholder="Motivo (facoltativo): es. Ferie, Natale..."></div>
+      <div class="actions-row"><button class="btn small" id="btn-aggiungi-chiusura">+ Aggiungi chiusura</button></div>
+      <div style="margin-top:10px;">
+        ${prossimeChiusure.length ? prossimeChiusure.map(ch=>`<div class="appt-row" style="padding:6px 0;border-bottom:1px solid var(--line);">
+          <div>${fmtData(ch.data)}${ch.motivo?' — '+esc(ch.motivo):''}</div>
+          <button class="btn ghost small" data-rimuovi-chiusura="${ch.data}">Riapri</button>
+        </div>`).join('') : `<div class="empty">Nessuna chiusura programmata.</div>`}
+      </div>
+    ` : (prossimeChiusure.length ? `<div class="appt-meta" style="margin-top:6px;">${prossimeChiusure.length} chiusura/e programmata/e — clicca "Gestisci" per vederle.</div>` : '')}
+  </div>`;
+
   if(staffBooking && staffBooking.scope.kind==="admin"){
     html += renderPrenotazioneInterna();
   } else if(registraClienteForm){
@@ -1462,10 +1757,10 @@ function renderAdminAgenda(){
   html += `<h2 class="section-title">Tutti gli appuntamenti</h2>`;
   if(tutti.length===0) html += `<div class="empty">Nessun appuntamento registrato ancora. Prova a prenotarne uno dall'Area Cliente.</div>`;
   tutti.forEach(a=>{
-    const s = getService(a.serviceId); const p = getPro(a.proId);
+    const s = serviziAppt(a); const p = getPro(a.proId);
     html += `<div class="appt stato-${a.stato.replace(/\s/g,'')}">
       <div class="appt-row">
-        <div><strong>${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${s?s.name:''} · ${p?p.nome:''}</div></div>
+        <div><strong>${nomeApptCliente(a)}${a.ospite?' (ospite)':''}</strong><div class="appt-meta">${fmtData(a.data)} · ${a.ora} · ${nomiServizi(s)} · ${p?p.nome:''}</div><div class="appt-meta">Prenotato da: ${esc(a.creatoDa || 'Cliente (online)')}</div></div>
         <span class="badge ${badgeClass(a.stato)}">${a.stato}</span>
       </div>
       <div class="appt-meta">Pagamento: ${describePagamento(a)}</div>
@@ -1481,8 +1776,102 @@ function renderAdminAgenda(){
   return html;
 }
 
+function renderAdminPromo(){
+  let html = ``;
+  if(promoForm){
+    const f = promoForm;
+    const serviziArea = f.area!=="tutte" ? DB.services.filter(s=>s.area===f.area) : [];
+    html += `<div class="card">
+      <div class="appt-row"><strong>${f.id?'Modifica promozione':'Nuova promozione'}</strong></div>
+      <div class="field"><label>Nome promo</label><input type="text" id="promo-nome" value="${esc(f.nome)}" placeholder="Es. Weekend Nima"></div>
+      <div class="field"><label>Dal</label>
+        <div class="cal-trigger ${!f.dataInizio?'placeholder':''}" data-apri-calendario="promo-inizio" data-min="" data-valore="${f.dataInizio||''}">
+          <span>${f.dataInizio?fmtData(f.dataInizio):'Scegli una data'}</span><span class="cal-icon">📅</span>
+        </div>
+      </div>
+      <div class="field"><label>Al</label>
+        <div class="cal-trigger ${!f.dataFine?'placeholder':''}" data-apri-calendario="promo-fine" data-min="${f.dataInizio||''}" data-valore="${f.dataFine||''}">
+          <span>${f.dataFine?fmtData(f.dataFine):'Scegli una data'}</span><span class="cal-icon">📅</span>
+        </div>
+      </div>
+      <div class="field"><label>Settore</label><select id="promo-area">
+        <option value="tutte" ${f.area==='tutte'?'selected':''}>Tutti i settori</option>
+        ${AREE.map(a=>`<option value="${a}" ${f.area===a?'selected':''}>${a}</option>`).join('')}
+      </select></div>
+      ${f.area!=="tutte" ? `<div class="field"><label>Trattamenti coinvolti (nessuna spunta = tutti i trattamenti del settore)</label>
+        <div style="max-height:180px;overflow-y:auto;border:1.5px solid var(--line);border-radius:var(--r-sm);padding:8px;">
+          ${serviziArea.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13.5px;">
+            <input type="checkbox" data-promo-servizio="${s.id}" ${f.serviceIds.includes(s.id)?'checked':''}> ${esc(s.name)}
+          </label>`).join('')}
+        </div>
+      </div>` : ''}
+      <div class="field"><label>Tipo sconto</label><select id="promo-tiposconto">
+        <option value="percentuale" ${f.tipoSconto==='percentuale'?'selected':''}>Percentuale (%)</option>
+        <option value="fisso" ${f.tipoSconto==='fisso'?'selected':''}>Sconto fisso (€)</option>
+      </select></div>
+      <div class="field"><label>Valore sconto</label><input type="number" min="0" step="0.01" id="promo-valore" value="${f.valoreSconto}"></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="promo-pagamento" ${f.pagamentoObbligatorio?'checked':''}> 💳 Pagamento anticipato obbligatorio (100% online per confermare)</label></div>
+      <div class="field"><label>Punti fedeltà</label><select id="promo-moltiplicatore">
+        <option value="0" ${f.moltiplicatorePunti===0?'selected':''}>Nessun punto</option>
+        <option value="1" ${f.moltiplicatorePunti===1?'selected':''}>Punti normali</option>
+        <option value="2" ${f.moltiplicatorePunti===2?'selected':''}>Punti x2</option>
+        <option value="3" ${f.moltiplicatorePunti===3?'selected':''}>Punti x3</option>
+      </select></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="promo-attiva" ${f.attiva?'checked':''}> Promozione attiva</label></div>
+      <div class="actions-row">
+        <button class="btn" id="btn-salva-promo">Salva</button>
+        <button class="btn ghost" id="btn-annulla-promo">Annulla</button>
+      </div>
+    </div>`;
+  } else {
+    html += `<div class="actions-row" style="margin-bottom:10px;"><button class="btn" id="btn-nuova-promo">+ Crea promo</button></div>`;
+  }
+
+  const tutte = (DB.promo||[]).slice().sort((a,b)=> a.dataInizio<b.dataInizio?1:-1);
+  if(!promoForm && tutte.length===0) html += `<div class="empty">Nessuna promozione creata ancora.</div>`;
+  tutte.forEach(pr=>{
+    const attivaOra = promoAttivaOggi(pr);
+    const scaduta = pr.dataFine < oggiISO();
+    html += `<div class="card">
+      <div class="appt-row">
+        <div><strong>${esc(pr.nome)}</strong><div class="appt-meta">${fmtData(pr.dataInizio)} → ${fmtData(pr.dataFine)} · ${pr.area==='tutte'?'tutti i settori':esc(pr.area)}</div></div>
+        <span class="badge ${attivaOra?'ok':(scaduta?'muted':'warn')}">${!pr.attiva?'Disattivata':(attivaOra?'Attiva':(scaduta?'Scaduta':'Programmata'))}</span>
+      </div>
+      <div class="appt-meta">Sconto: ${pr.tipoSconto==='percentuale'?pr.valoreSconto+'%':'€'+pr.valoreSconto}${pr.pagamentoObbligatorio?' · pagamento anticipato obbligatorio':''} · punti ${pr.moltiplicatorePunti===0?'nessuno':'x'+pr.moltiplicatorePunti}</div>
+      ${pr.serviceIds && pr.serviceIds.length ? `<div class="appt-meta">Trattamenti: ${pr.serviceIds.map(id=>{const s=getService(id);return s?s.name:'';}).filter(Boolean).join(', ')}</div>` : ''}
+      <div class="actions-row">
+        <button class="btn ghost small" data-modifica-promo="${pr.id}">Modifica</button>
+        <button class="btn ghost small" data-toggle-promo="${pr.id}">${pr.attiva?'Disattiva':'Attiva'}</button>
+        <button class="btn ghost small danger" data-elimina-promo="${pr.id}">Elimina</button>
+      </div>
+    </div>`;
+  });
+  return html;
+}
+
+function renderRisultatoBuono(r){
+  if(!r.trovato){
+    return `<div class="warn-box" style="margin-top:10px;">Nessun buono trovato con questo codice.</div>`;
+  }
+  const bu = r.buono;
+  const usato = bu.stato==="utilizzato";
+  return `<div class="${usato?'warn-box':'notice soft'}" style="margin-top:10px;">
+    <strong>${usato?'🔴 Buono già utilizzato':'🟢 Buono valido'}</strong><br>
+    ${esc(bu.premioNome)}<br>
+    Cliente: ${esc(bu.clienteNome)}<br>
+    Scadenza: ${fmtData(bu.scadenza)}
+    ${!usato ? `<div class="actions-row" style="margin-top:8px;"><button class="btn small" data-usa-buono="${bu.codice}">Segna come utilizzato</button></div>` : ''}
+  </div>`;
+}
+
 function renderAdminClienti(){
-  let html = `<h2 class="section-title">Clienti (${DB.clients.length})</h2>`;
+  let html = `<div class="card">
+    <div class="appt-row"><strong>Verifica buono</strong></div>
+    <div class="field"><input type="text" id="verifica-buono-codice" placeholder="Es. NIMA-A7K92X" style="text-transform:uppercase;"></div>
+    <div class="actions-row"><button class="btn small" id="btn-verifica-buono">Verifica</button></div>
+    ${buonoVerificaRisultato ? renderRisultatoBuono(buonoVerificaRisultato) : ''}
+  </div>`;
+  html += `<h2 class="section-title">Clienti (${DB.clients.length})</h2>`;
   if(DB.clients.length===0) html += `<div class="empty">Nessuna cliente registrata ancora.</div>`;
   const oggi = new Date();
   DB.clients.slice().sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(c=>{
@@ -1499,6 +1888,7 @@ function renderAdminClienti(){
         <div><strong>${esc(c.nome)}</strong><div class="appt-meta">${esc(c.telefono)}${c.email?' · '+esc(c.email):''} · ${storicoCompleto.length} appuntamenti · ${c.punti||0} punti fedeltà</div></div>
         ${inattiva? '<span class="badge muted">Inattiva</span>':''}
       </div>
+      <div class="appt-meta">Codice amica: ${esc(c.codiceReferral||'-')}${c.riferitoDa ? ` · Portata da: ${esc((DB.clients.find(x=>x.id===c.riferitoDa)||{}).nome || '—')}` : ''}</div>
       <div class="actions-row">
         <button class="btn ghost small" data-export="${c.id}|interno">Esporta PDF interno</button>
         <button class="btn ghost small" data-export="${c.id}|cliente">Esporta PDF cliente</button>
@@ -1514,6 +1904,9 @@ function renderAdminClienti(){
         <input type="number" min="1" step="1" data-punti-input="${c.id}" placeholder="punti" style="width:70px;padding:6px 8px;font-size:12px;">
         <button class="btn ghost small" data-punti-agg="${c.id}">+ Aggiungi punti</button>
         <button class="btn ghost small" data-punti-tog="${c.id}">- Togli punti</button>
+      </div>
+      <div class="actions-row" style="margin-top:8px;">
+        ${!c.recensioneAssegnata ? `<button class="btn ghost small" data-segna-recensione="${c.id}">+ Segna recensione (+${PUNTI_RECENSIONE} pt)</button>` : `<span class="appt-meta">✓ Recensione già premiata</span>`}
       </div>
     </div>`;
   });
@@ -1599,12 +1992,12 @@ function renderAdminStats(){
     if(a.pagamento.tipo==="acconto"){
       incassato += a.pagamento.importo;
       acconti += a.pagamento.importo;
-      const s = getService(a.serviceId);
-      if(s) daIncassareNegozio += (s.prezzo - a.pagamento.importo);
+      const totaleServizi = prezzoTotale(serviziAppt(a));
+      if(totaleServizi) daIncassareNegozio += (totaleServizi - a.pagamento.importo);
     }
   });
   const conteggioServizi = {};
-  completati.forEach(a=>{ const s=getService(a.serviceId); if(s) conteggioServizi[s.name]=(conteggioServizi[s.name]||0)+1; });
+  completati.forEach(a=>{ serviziAppt(a).forEach(s=>{ conteggioServizi[s.name]=(conteggioServizi[s.name]||0)+1; }); });
   const topServizi = Object.entries(conteggioServizi).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   let html = `<h2 class="section-title">Statistiche generali</h2>
@@ -1748,6 +2141,133 @@ function renderPaginaLegale(tipo){
   </div>`;
 }
 
+function renderCalendarioPersonalizzato(){
+  if(!calendarioAperto) return '';
+  const oggi = new Date(); oggi.setHours(0,0,0,0);
+  const mese = new Date(calendarioAperto.mese+"T00:00:00");
+  const anno = mese.getFullYear(), meseNum = mese.getMonth();
+  const primoDelMese = new Date(anno, meseNum, 1);
+  const giornoSettPrimo = primoDelMese.getDay(); // 0=Dom..6=Sab
+  const offsetInizio = giornoSettPrimo===0 ? 6 : giornoSettPrimo-1; // Lun=0
+  const giorniNelMese = new Date(anno, meseNum+1, 0).getDate();
+  const nomeMese = primoDelMese.toLocaleDateString('it-IT', {month:'long', year:'numeric'});
+  const minDate = calendarioAperto.min ? new Date(calendarioAperto.min+"T00:00:00") : null;
+  const selezionata = calendarioAperto.valoreAttuale ? new Date(calendarioAperto.valoreAttuale+"T00:00:00") : null;
+
+  let celle = '';
+  for(let i=0;i<offsetInizio;i++) celle += `<div class="cal-day empty"></div>`;
+  for(let g=1; g<=giorniNelMese; g++){
+    const d = new Date(anno, meseNum, g);
+    const iso = dataLocaleISO(d);
+    const bloccaChiusure = calendarioAperto.campo==='sel-data' || calendarioAperto.campo==='sb-data';
+    const disabilitato = (minDate && d < minDate) || (calendarioAperto.escludiGiorni||[]).includes(d.getDay()) || (bloccaChiusure && (DB.chiusure||[]).some(ch=>ch.data===iso));
+    const isOggi = d.getTime()===oggi.getTime();
+    const isSelezionata = selezionata && d.getTime()===selezionata.getTime();
+    celle += `<div class="cal-day ${disabilitato?'disabled':''} ${isOggi?'today':''} ${isSelezionata?'selected':''}" ${disabilitato?'':`data-cal-giorno="${iso}"`}>${g}</div>`;
+  }
+
+  return `<div class="cal-overlay" id="cal-overlay">
+    <div class="cal-popup">
+      <div class="cal-header">
+        <button class="cal-nav" id="cal-mese-prev" type="button">‹</button>
+        <div class="cal-titolo">${nomeMese}</div>
+        <button class="cal-nav" id="cal-mese-next" type="button">›</button>
+      </div>
+      <div class="cal-weekdays"><div>L</div><div>M</div><div>M</div><div>G</div><div>V</div><div>S</div><div>D</div></div>
+      <div class="cal-grid">${celle}</div>
+      <div class="cal-footer"><button class="btn ghost small" id="cal-chiudi" type="button">Chiudi</button></div>
+    </div>
+  </div>`;
+}
+
+function apriCalendarioPersonalizzato(campo, min, valoreAttuale, escludiGiorni){
+  const base = valoreAttuale || (min && min > oggiISO() ? min : oggiISO());
+  calendarioAperto = {campo, min: min||null, valoreAttuale: valoreAttuale||null, escludiGiorni: escludiGiorni||[], mese: base.slice(0,8)+"01"};
+  render();
+}
+
+function generaPdfCliente(cliente, tipo){
+  if(typeof window.jspdf === "undefined"){
+    alert("La libreria per generare il PDF non si è caricata (serve connessione internet). Riprova tra poco.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const larghezzaPagina = doc.internal.pageSize.getWidth();
+  const altezzaPagina = doc.internal.pageSize.getHeight();
+  const margine = 15;
+  const larghezzaUtile = larghezzaPagina - margine*2;
+  let y = 32;
+
+  function scriviTesto(testo, dimensione, stile){
+    doc.setFont("helvetica", stile||"normal");
+    doc.setFontSize(dimensione);
+    doc.setTextColor(30,30,30);
+    const righe = doc.splitTextToSize(testo, larghezzaUtile);
+    righe.forEach(riga=>{
+      if(y > altezzaPagina - margine){ doc.addPage(); y = margine; }
+      doc.text(riga, margine, y);
+      y += dimensione*0.42;
+    });
+  }
+  function spazio(mm){ y += mm; }
+
+  doc.setFillColor(214,31,122);
+  doc.rect(0,0,larghezzaPagina,22,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(16);
+  doc.text("Nima Hair & Beauty", margine, 14);
+
+  scriviTesto(tipo==="interno" ? "Report interno cliente" : "Riepilogo cliente", 15, "bold");
+  spazio(3);
+  scriviTesto(`Nome: ${cliente.nome}`, 11);
+  if(cliente.telefono) scriviTesto(`Telefono: ${cliente.telefono}`, 11);
+  if(cliente.email) scriviTesto(`Email: ${cliente.email}`, 11);
+  if(cliente.creato) scriviTesto(`Cliente dal: ${fmtData(cliente.creato.slice(0,10))}`, 11);
+  scriviTesto(`Punti fedeltà attuali: ${cliente.punti||0}`, 11, "bold");
+  spazio(5);
+
+  scriviTesto("Storico appuntamenti", 13, "bold");
+  spazio(2);
+  const storico = DB.appts.filter(a=>a.clienteId===cliente.id).sort((a,b)=> (a.data+a.ora) < (b.data+b.ora) ? 1 : -1);
+  if(storico.length===0){
+    scriviTesto("Nessun appuntamento registrato.", 10.5);
+  } else {
+    storico.forEach(a=>{
+      const servizi = serviziAppt(a);
+      const pro = getPro(a.proId);
+      scriviTesto(`${fmtData(a.data)} · ${a.ora} — ${nomiServizi(servizi)}`, 11, "bold");
+      let riga2 = `Professionista: ${pro?pro.nome:'-'} · Stato: ${a.stato} · Pagamento: ${describePagamento(a)}`;
+      if(tipo==="interno" && a.creatoDa) riga2 += ` · Prenotato da: ${a.creatoDa}`;
+      scriviTesto(riga2, 10);
+      spazio(2);
+    });
+  }
+
+  if(tipo==="interno" && cliente.note && cliente.note.length){
+    spazio(4);
+    scriviTesto("Note interne", 13, "bold");
+    spazio(2);
+    cliente.note.forEach(n=>{
+      scriviTesto(`— ${n.testo} (${n.proNome||''}, ${n.data?fmtData(n.data.slice(0,10)):''})`, 10);
+    });
+  }
+
+  const numPagine = doc.internal.getNumberOfPages();
+  for(let p=1;p<=numPagine;p++){
+    doc.setPage(p);
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(120,120,120);
+    doc.text("Nima Hair & Beauty (Pionico Group S.r.l.s.) — Via Roma 163, Bellizzi (SA) — P.IVA 06224290657", margine, altezzaPagina-8);
+    doc.text(`Generato il ${new Date().toLocaleDateString('it-IT')} · Pag. ${p}/${numPagine}`, larghezzaPagina-margine, altezzaPagina-8, {align:'right'});
+  }
+
+  const nomeFile = `${tipo==="interno"?"report-interno":"riepilogo"}-${cliente.nome.replace(/\s+/g,'-').toLowerCase()}.pdf`;
+  doc.save(nomeFile);
+}
+
 function renderFooterLinks(){
   return `© ${new Date().getFullYear()} Nima Hair & Beauty (Pionico Group S.r.l.s.) — Via Roma 163, Bellizzi (SA) — P.IVA 06224290657
   <div class="footer-links">
@@ -1776,6 +2296,7 @@ function attachHandlers(){
     const telefono = document.getElementById('reg-telefono').value.trim();
     const email = document.getElementById('reg-email').value.trim();
     const password = document.getElementById('reg-password').value;
+    const codiceInserito = document.getElementById('reg-referral').value.trim().toUpperCase();
     if(!nome || !telefono || !email || !password){ clienteAuthErr = "Compila tutti i campi."; render(); return; }
     logDebug('Registrazione: invio richiesta a Firebase Auth per ' + email);
     firebaseAuth.createUserWithEmailAndPassword(email, password).then(cred=>{
@@ -1785,10 +2306,13 @@ function attachHandlers(){
       }).catch(e=>{
         logDebug('Invio email di verifica fallito: ' + e.message);
       });
-      const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO()};
+      const referrer = codiceInserito ? DB.clients.find(c=>c.codiceReferral===codiceInserito) : null;
+      const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:cred.user.uid, note:[], creato:adessoISO(),
+        punti: PUNTI_REGISTRAZIONE, codiceReferral: generaCodiceReferralUnico(),
+        riferitoDa: referrer ? referrer.id : null, puntiReferralAssegnati: false};
       clienteRecordFallback = nuovoCliente;
       DB.clients.push(nuovoCliente);
-      log(`Nuova cliente registrata: ${nome}`);
+      log(`Nuova cliente registrata: ${nome} (+${PUNTI_REGISTRAZIONE} punti benvenuto)${referrer?` · portata da ${referrer.nome}`:''}`);
       clienteAuth = {uid:cred.user.uid, email:cred.user.email};
       clienteAuthErr = null;
       logDebug('Registrazione: profilo creato in memoria, salvo e ridisegno');
@@ -1819,6 +2343,26 @@ function attachHandlers(){
   });
   const btnClienteLogout = document.getElementById('btn-cliente-logout');
   if(btnClienteLogout) btnClienteLogout.addEventListener('click', ()=>{ firebaseAuth.signOut(); });
+  const btnSalvaProfilo = document.getElementById('btn-salva-profilo');
+  if(btnSalvaProfilo) btnSalvaProfilo.addEventListener('click', ()=>{
+    const c = clienteRecord;
+    const nome = document.getElementById('prof-nome').value.trim();
+    if(!nome){ profiloClienteMsg = "Il nome non può essere vuoto."; render(); return; }
+    c.nome = nome;
+    c.telefono = document.getElementById('prof-telefono').value.trim();
+    c.indirizzo = document.getElementById('prof-indirizzo').value.trim();
+    c.cap = document.getElementById('prof-cap').value.trim();
+    c.citta = document.getElementById('prof-citta').value.trim();
+    const g = document.getElementById('prof-nascita-giorno').value;
+    const m = document.getElementById('prof-nascita-mese').value;
+    const a = document.getElementById('prof-nascita-anno').value;
+    if(g && m && a){
+      c.dataNascita = `${a}-${String(m).padStart(2,'0')}-${String(g).padStart(2,'0')}`;
+    }
+    profiloClienteMsg = "Profilo aggiornato.";
+    log(`${c.nome} ha aggiornato il proprio profilo`);
+    saveDB(); render();
+  });
   const btnPasswordDimenticata = document.getElementById('btn-cliente-password-dimenticata');
   if(btnPasswordDimenticata) btnPasswordDimenticata.addEventListener('click', ()=>{
     const emailField = document.getElementById('login-email');
@@ -1847,7 +2391,7 @@ function attachHandlers(){
   const pillArea = document.getElementById('pill-area');
   if(pillArea) pillArea.querySelectorAll('.pill').forEach(p=>{
     p.addEventListener('click', ()=>{
-      bookingState = {area:p.dataset.area, serviceId:null, proId:null, data:null, ora:null};
+      bookingState = {area:p.dataset.area, serviceIds:[], proId:null, data:null, ora:null};
       servizioDropdownAperto = false;
       render();
     });
@@ -1859,12 +2403,29 @@ function attachHandlers(){
     render();
   });
   app.querySelectorAll('[data-scegli-servizio]').forEach(opt=>{
-    opt.addEventListener('click', ()=>{
-      bookingState.serviceId = opt.dataset.scegliServizio;
+    opt.addEventListener('click', e=>{
+      e.stopPropagation();
+      const id = opt.dataset.scegliServizio;
+      const s = getService(id);
+      if(!s) return;
+      if(s.concordare){
+        bookingState.serviceIds = [id];
+        servizioDropdownAperto = false;
+      } else {
+        let attuali = bookingState.serviceIds.filter(sid=>{ const cs = getService(sid); return cs && !cs.concordare; });
+        const idx = attuali.indexOf(id);
+        if(idx>=0) attuali.splice(idx,1); else attuali.push(id);
+        bookingState.serviceIds = attuali;
+      }
       bookingState.data = null; bookingState.ora = null;
-      servizioDropdownAperto = false;
       render();
     });
+  });
+  const btnChiudiSvcSelect = document.getElementById('btn-chiudi-svc-select');
+  if(btnChiudiSvcSelect) btnChiudiSvcSelect.addEventListener('click', e=>{
+    e.stopPropagation();
+    servizioDropdownAperto = false;
+    render();
   });
   const selPro = document.getElementById('sel-pro');
   if(selPro) selPro.addEventListener('change', e=>{
@@ -1872,20 +2433,52 @@ function attachHandlers(){
     bookingState.ora = null;
     render();
   });
-  const selData = document.getElementById('sel-data');
-  if(selData) selData.addEventListener('change', e=>{
-    const val = e.target.value;
-    if(val){
-      const giorno = new Date(val+"T00:00:00").getDay();
-      if(giorno===0 || giorno===1){
-        alert("Il salone è chiuso la domenica e il lunedì. Scegli un giorno da martedì a sabato.");
-        e.target.value = bookingState.data || '';
-        return;
-      }
-    }
-    bookingState.data = val || null;
-    bookingState.ora = null;
+  app.querySelectorAll('[data-apri-calendario]').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      const campo = t.dataset.apriCalendario;
+      const min = t.dataset.min || null;
+      const valore = t.dataset.valore || null;
+      const escludiGiorni = campo==='sel-data' ? [0,1] : [];
+      apriCalendarioPersonalizzato(campo, min, valore, escludiGiorni);
+    });
+  });
+  const calMesePrev = document.getElementById('cal-mese-prev');
+  if(calMesePrev) calMesePrev.addEventListener('click', ()=>{
+    const m = new Date(calendarioAperto.mese+"T00:00:00");
+    m.setMonth(m.getMonth()-1);
+    calendarioAperto.mese = dataLocaleISO(m).slice(0,8)+"01";
     render();
+  });
+  const calMeseNext = document.getElementById('cal-mese-next');
+  if(calMeseNext) calMeseNext.addEventListener('click', ()=>{
+    const m = new Date(calendarioAperto.mese+"T00:00:00");
+    m.setMonth(m.getMonth()+1);
+    calendarioAperto.mese = dataLocaleISO(m).slice(0,8)+"01";
+    render();
+  });
+  const calChiudi = document.getElementById('cal-chiudi');
+  if(calChiudi) calChiudi.addEventListener('click', ()=>{ calendarioAperto = null; render(); });
+  const calOverlay = document.getElementById('cal-overlay');
+  if(calOverlay) calOverlay.addEventListener('click', e=>{
+    if(e.target.id==='cal-overlay'){ calendarioAperto = null; render(); }
+  });
+  app.querySelectorAll('[data-cal-giorno]').forEach(cella=>{
+    cella.addEventListener('click', ()=>{
+      const iso = cella.dataset.calGiorno;
+      const campo = calendarioAperto.campo;
+      if(campo==='sel-data'){ bookingState.data = iso; bookingState.ora = null; }
+      else if(campo==='sb-data'){ staffBooking.data = iso; staffBooking.ora = null; }
+      else if(campo==='settimana'){
+        settimanaOffset = offsetSettimanaPerData(iso);
+        giornoSettimanaEspanso = null;
+        calendarioSettimanaAperto = false;
+      }
+      else if(campo==='chiusura'){ nuovaChiusuraData = iso; }
+      else if(campo==='promo-inizio'){ promoForm.dataInizio = iso; }
+      else if(campo==='promo-fine'){ promoForm.dataFine = iso; }
+      calendarioAperto = null;
+      render();
+    });
   });
   app.querySelectorAll('.slot[data-ora]').forEach(s=>{
     s.addEventListener('click', ()=>{
@@ -1902,9 +2495,8 @@ function attachHandlers(){
     b.addEventListener('click', async ()=>{
       const appt = DB.appts.find(x=>x.id===b.dataset.riprovaPagamento);
       if(!appt || !appt.pagamento) return;
-      const servizio = getService(appt.serviceId);
       b.disabled = true; b.textContent = "Attendere...";
-      await avviaPagamentoSumUp(appt, appt.pagamento, servizio);
+      await avviaPagamentoSumUp(appt, appt.pagamento, nomiServizi(serviziAppt(appt)));
     });
   });
 
@@ -1913,12 +2505,12 @@ function attachHandlers(){
     b.addEventListener('click', async ()=>{
       const appt = DB.appts.find(x=>x.id===b.dataset.pagaFacoltativo);
       if(!appt) return;
-      const servizio = getService(appt.serviceId);
-      if(!servizio) return;
-      appt.pagamento = {tipo:"online", importo:servizio.prezzo, stato:"in_attesa"};
+      const servizi = serviziAppt(appt);
+      if(!servizi.length) return;
+      appt.pagamento = {tipo:"online", importo:prezzoTotale(servizi), stato:"in_attesa"};
       b.disabled = true; b.textContent = "Attendere...";
       await saveDB();
-      await avviaPagamentoSumUp(appt, appt.pagamento, servizio);
+      await avviaPagamentoSumUp(appt, appt.pagamento, nomiServizi(servizi));
     });
   });
 
@@ -1953,15 +2545,20 @@ function attachHandlers(){
     render();
   });
   const btnProLogout = document.getElementById('btn-pro-logout');
-  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; settimanaOffset = 0; giornoSettimanaEspanso = null; registraClienteForm = null; render(); });
+  if(btnProLogout) btnProLogout.addEventListener('click', ()=>{ proAuth = null; settimanaOffset = 0; giornoSettimanaEspanso = null; calendarioSettimanaAperto = false; registraClienteForm = null; render(); });
 
   // --- STAFF: navigazione settimane riepilogo ---
   const btnSettimanaPrev = document.getElementById('btn-settimana-prev');
-  if(btnSettimanaPrev) btnSettimanaPrev.addEventListener('click', ()=>{ settimanaOffset--; giornoSettimanaEspanso = null; render(); });
+  if(btnSettimanaPrev) btnSettimanaPrev.addEventListener('click', ()=>{ settimanaOffset--; giornoSettimanaEspanso = null; calendarioSettimanaAperto = false; render(); });
   const btnSettimanaNext = document.getElementById('btn-settimana-next');
-  if(btnSettimanaNext) btnSettimanaNext.addEventListener('click', ()=>{ settimanaOffset++; giornoSettimanaEspanso = null; render(); });
+  if(btnSettimanaNext) btnSettimanaNext.addEventListener('click', ()=>{ settimanaOffset++; giornoSettimanaEspanso = null; calendarioSettimanaAperto = false; render(); });
   const btnSettimanaOggi = document.getElementById('btn-settimana-oggi');
-  if(btnSettimanaOggi) btnSettimanaOggi.addEventListener('click', ()=>{ settimanaOffset=0; giornoSettimanaEspanso = null; render(); });
+  if(btnSettimanaOggi) btnSettimanaOggi.addEventListener('click', ()=>{ settimanaOffset=0; giornoSettimanaEspanso = null; calendarioSettimanaAperto = false; render(); });
+  const btnCalendarioSettimana = document.getElementById('btn-calendario-settimana');
+  if(btnCalendarioSettimana) btnCalendarioSettimana.addEventListener('click', ()=>{
+    calendarioSettimanaAperto = !calendarioSettimanaAperto;
+    render();
+  });
   app.querySelectorAll('[data-espandi-giorno]').forEach(row=>{
     row.addEventListener('click', ()=>{
       const data = row.dataset.espandiGiorno;
@@ -1992,6 +2589,124 @@ function attachHandlers(){
   // --- PRENOTAZIONE INTERNA (staff + admin) ---
   const btnApriStaff = document.querySelector('[data-apri-prenot-staff]');
   if(btnApriStaff) btnApriStaff.addEventListener('click', ()=>{ apriPrenotazioneInterna({kind:"staff", proId: proAuth.id}); });
+  const btnToggleChiusure = document.getElementById('btn-toggle-chiusure');
+  if(btnToggleChiusure) btnToggleChiusure.addEventListener('click', ()=>{
+    chiusureAperto = !chiusureAperto;
+    nuovaChiusuraData = null;
+    render();
+  });
+  const btnAggiungiChiusura = document.getElementById('btn-aggiungi-chiusura');
+  if(btnAggiungiChiusura) btnAggiungiChiusura.addEventListener('click', ()=>{
+    if(!nuovaChiusuraData){ alert("Scegli prima una data."); return; }
+    if(!DB.chiusure) DB.chiusure = [];
+    if(DB.chiusure.some(ch=>ch.data===nuovaChiusuraData)){ alert("Questa data è già segnata come chiusa."); return; }
+    const motivo = (document.getElementById('chiusura-motivo').value||"").trim();
+    DB.chiusure.push({data:nuovaChiusuraData, motivo});
+    log(`Chiusura aggiunta: ${fmtData(nuovaChiusuraData)}${motivo?' ('+motivo+')':''}`);
+    nuovaChiusuraData = null;
+    saveDB(); render();
+  });
+  app.querySelectorAll('[data-rimuovi-chiusura]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const data = b.dataset.rimuoviChiusura;
+      if(!confirm(`Riaprire il ${fmtData(data)}?`)) return;
+      DB.chiusure = (DB.chiusure||[]).filter(ch=>ch.data!==data);
+      log(`Chiusura rimossa: ${fmtData(data)}`);
+      saveDB(); render();
+    });
+  });
+
+  // --- ADMIN: promozioni ---
+  const btnNuovaPromo = document.getElementById('btn-nuova-promo');
+  if(btnNuovaPromo) btnNuovaPromo.addEventListener('click', ()=>{
+    promoForm = {id:null, nome:"", dataInizio:"", dataFine:"", area:"tutte", serviceIds:[], tipoSconto:"percentuale", valoreSconto:"", pagamentoObbligatorio:false, moltiplicatorePunti:1, attiva:true};
+    render();
+  });
+  const btnAnnullaPromo = document.getElementById('btn-annulla-promo');
+  if(btnAnnullaPromo) btnAnnullaPromo.addEventListener('click', ()=>{ promoForm = null; render(); });
+  const promoNome = document.getElementById('promo-nome');
+  if(promoNome) promoNome.addEventListener('input', e=>{ promoForm.nome = e.target.value; });
+  const promoAreaSel = document.getElementById('promo-area');
+  if(promoAreaSel) promoAreaSel.addEventListener('change', e=>{
+    promoForm.area = e.target.value;
+    promoForm.serviceIds = [];
+    render();
+  });
+  app.querySelectorAll('[data-promo-servizio]').forEach(chk=>{
+    chk.addEventListener('change', e=>{
+      const id = chk.dataset.promoServizio;
+      if(e.target.checked){ if(!promoForm.serviceIds.includes(id)) promoForm.serviceIds.push(id); }
+      else { promoForm.serviceIds = promoForm.serviceIds.filter(x=>x!==id); }
+    });
+  });
+  const promoTipoSconto = document.getElementById('promo-tiposconto');
+  if(promoTipoSconto) promoTipoSconto.addEventListener('change', e=>{ promoForm.tipoSconto = e.target.value; });
+  const promoValore = document.getElementById('promo-valore');
+  if(promoValore) promoValore.addEventListener('input', e=>{ promoForm.valoreSconto = e.target.value; });
+  const promoPagamento = document.getElementById('promo-pagamento');
+  if(promoPagamento) promoPagamento.addEventListener('change', e=>{ promoForm.pagamentoObbligatorio = e.target.checked; });
+  const promoMoltiplicatore = document.getElementById('promo-moltiplicatore');
+  if(promoMoltiplicatore) promoMoltiplicatore.addEventListener('change', e=>{ promoForm.moltiplicatorePunti = parseInt(e.target.value,10); });
+  const promoAttivaChk = document.getElementById('promo-attiva');
+  if(promoAttivaChk) promoAttivaChk.addEventListener('change', e=>{ promoForm.attiva = e.target.checked; });
+  const btnSalvaPromo = document.getElementById('btn-salva-promo');
+  if(btnSalvaPromo) btnSalvaPromo.addEventListener('click', ()=>{
+    const f = promoForm;
+    if(!f.nome.trim()){ alert("Inserisci il nome della promozione."); return; }
+    if(!f.dataInizio || !f.dataFine){ alert("Scegli data di inizio e fine."); return; }
+    if(f.dataFine < f.dataInizio){ alert("La data di fine non può essere prima della data di inizio."); return; }
+    const valore = parseFloat(f.valoreSconto);
+    if(!valore || valore<=0){ alert("Inserisci un valore di sconto valido."); return; }
+    if(!DB.promo) DB.promo = [];
+    if(f.id){
+      const pr = DB.promo.find(x=>x.id===f.id);
+      if(pr){
+        pr.nome=f.nome.trim(); pr.dataInizio=f.dataInizio; pr.dataFine=f.dataFine; pr.area=f.area;
+        pr.serviceIds=f.serviceIds.slice(); pr.tipoSconto=f.tipoSconto; pr.valoreSconto=valore;
+        pr.pagamentoObbligatorio=f.pagamentoObbligatorio; pr.moltiplicatorePunti=f.moltiplicatorePunti; pr.attiva=f.attiva;
+      }
+      log(`Promo modificata: ${f.nome}`);
+    } else {
+      DB.promo.push({
+        id: uid("promo"), nome:f.nome.trim(), dataInizio:f.dataInizio, dataFine:f.dataFine, area:f.area,
+        serviceIds:f.serviceIds.slice(), tipoSconto:f.tipoSconto, valoreSconto:valore,
+        pagamentoObbligatorio:f.pagamentoObbligatorio, moltiplicatorePunti:f.moltiplicatorePunti, attiva:f.attiva
+      });
+      log(`Nuova promo creata: ${f.nome}`);
+    }
+    promoForm = null;
+    saveDB(); render();
+  });
+  app.querySelectorAll('[data-modifica-promo]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const pr = (DB.promo||[]).find(x=>x.id===b.dataset.modificaPromo);
+      if(!pr) return;
+      promoForm = {id:pr.id, nome:pr.nome, dataInizio:pr.dataInizio, dataFine:pr.dataFine, area:pr.area,
+        serviceIds:(pr.serviceIds||[]).slice(), tipoSconto:pr.tipoSconto, valoreSconto:pr.valoreSconto,
+        pagamentoObbligatorio:pr.pagamentoObbligatorio, moltiplicatorePunti:pr.moltiplicatorePunti, attiva:pr.attiva};
+      render();
+    });
+  });
+  app.querySelectorAll('[data-toggle-promo]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const pr = (DB.promo||[]).find(x=>x.id===b.dataset.togglePromo);
+      if(!pr) return;
+      pr.attiva = !pr.attiva;
+      log(`Promo "${pr.nome}" ${pr.attiva?'attivata':'disattivata'}`);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-elimina-promo]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const pr = (DB.promo||[]).find(x=>x.id===b.dataset.eliminaPromo);
+      if(!pr) return;
+      if(!confirm(`Eliminare la promo "${pr.nome}"?`)) return;
+      DB.promo = DB.promo.filter(x=>x.id!==pr.id);
+      log(`Promo eliminata: ${pr.nome}`);
+      saveDB(); render();
+    });
+  });
+
   const btnApriAdmin = document.getElementById('btn-apri-prenot-admin');
   if(btnApriAdmin) btnApriAdmin.addEventListener('click', ()=>{ apriPrenotazioneInterna({kind:"admin"}); });
 
@@ -2029,9 +2744,10 @@ function attachHandlers(){
     if(!firebaseAuth){ registraClienteErr = "Servizio di accesso non disponibile al momento."; render(); return; }
     registraClienteErr = null;
     creaAccessoClienteViaStaff(email, password).then(nuovoAuthUid=>{
-      const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:nuovoAuthUid, note:[], creato:adessoISO()};
+      const nuovoCliente = {id:uid("c"), nome, telefono, email, authUid:nuovoAuthUid, note:[], creato:adessoISO(),
+        punti: PUNTI_REGISTRAZIONE, codiceReferral: generaCodiceReferralUnico(), riferitoDa: null, puntiReferralAssegnati: false};
       DB.clients.push(nuovoCliente);
-      log(`Cliente registrata dallo staff: ${nome}`);
+      log(`Cliente registrata dallo staff: ${nome} (+${PUNTI_REGISTRAZIONE} punti benvenuto)`);
       saveDB();
       registraClienteForm = null;
       alert(`${nome} è stata registrata. Può accedere con l'email ${email} e la password scelta.`);
@@ -2076,25 +2792,44 @@ function attachHandlers(){
   const sbArea = document.getElementById('sb-area');
   if(sbArea) sbArea.addEventListener('change', e=>{
     staffBooking.area = e.target.value || null;
-    staffBooking.serviceId=null; staffBooking.proId=null; staffBooking.data=null; staffBooking.ora=null;
+    staffBooking.serviceIds=[]; staffBooking.proId=null; staffBooking.data=null; staffBooking.ora=null;
+    sbServizioDropdownAperto = false;
     render();
   });
-  const sbServizio = document.getElementById('sb-servizio');
-  if(sbServizio) sbServizio.addEventListener('change', e=>{
-    staffBooking.serviceId = e.target.value || null;
-    staffBooking.data=null; staffBooking.ora=null;
+  const sbSvcTrigger = document.getElementById('sb-svc-select-trigger');
+  if(sbSvcTrigger) sbSvcTrigger.addEventListener('click', e=>{
+    e.stopPropagation();
+    sbServizioDropdownAperto = !sbServizioDropdownAperto;
+    render();
+  });
+  app.querySelectorAll('[data-sb-scegli-servizio]').forEach(opt=>{
+    opt.addEventListener('click', e=>{
+      e.stopPropagation();
+      const id = opt.dataset.sbScegliServizio;
+      const s = getService(id);
+      if(!s) return;
+      if(s.concordare){
+        staffBooking.serviceIds = [id];
+      } else {
+        let attuali = staffBooking.serviceIds.filter(sid=>{ const cs = getService(sid); return cs && !cs.concordare; });
+        const idx = attuali.indexOf(id);
+        if(idx>=0) attuali.splice(idx,1); else attuali.push(id);
+        staffBooking.serviceIds = attuali;
+      }
+      staffBooking.data=null; staffBooking.ora=null;
+      render();
+    });
+  });
+  const btnChiudiSbSvcSelect = document.getElementById('btn-chiudi-sb-svc-select');
+  if(btnChiudiSbSvcSelect) btnChiudiSbSvcSelect.addEventListener('click', e=>{
+    e.stopPropagation();
+    sbServizioDropdownAperto = false;
     render();
   });
   const sbPro = document.getElementById('sb-pro');
   if(sbPro) sbPro.addEventListener('change', e=>{
     staffBooking.proId = e.target.value || null;
     staffBooking.data=null; staffBooking.ora=null;
-    render();
-  });
-  const sbData = document.getElementById('sb-data');
-  if(sbData) sbData.addEventListener('change', e=>{
-    staffBooking.data = e.target.value || null;
-    staffBooking.ora=null;
     render();
   });
   app.querySelectorAll('.slot[data-sb-ora]').forEach(s=>{
@@ -2212,8 +2947,8 @@ function attachHandlers(){
     b.addEventListener('click', ()=>{
       const a = DB.appts.find(x=>x.id===b.dataset.eliminaAppt);
       if(!a) return;
-      const s = getService(a.serviceId);
-      if(!confirm(`Eliminare definitivamente l'appuntamento di ${nomeApptCliente(a)} (${fmtData(a.data)} ${a.ora}${s?', '+s.name:''})? L'appuntamento sparirà del tutto, anche dallo storico. Questa azione non si può annullare.`)) return;
+      const s = serviziAppt(a);
+      if(!confirm(`Eliminare definitivamente l'appuntamento di ${nomeApptCliente(a)} (${fmtData(a.data)} ${a.ora}${s.length?', '+nomiServizi(s):''})? L'appuntamento sparirà del tutto, anche dallo storico. Questa azione non si può annullare.`)) return;
       DB.appts = DB.appts.filter(x=>x.id!==a.id);
       log(`Admin ha eliminato definitivamente l'appuntamento di ${nomeApptCliente(a)} del ${a.data} ${a.ora}`);
       saveDB(); render();
@@ -2223,9 +2958,10 @@ function attachHandlers(){
     b.addEventListener('click', ()=>{
       const [cid, tipo] = b.dataset.export.split('|');
       const c = DB.clients.find(x=>x.id===cid);
+      if(!c) return;
+      generaPdfCliente(c, tipo);
       log(`Esportato PDF ${tipo} per ${c.nome} (${new Date().toLocaleString('it-IT')})`);
       saveDB(); render();
-      alert(`Esportazione "${tipo}" registrata nel log amministrativo per ${c.nome}.\nLa generazione del file PDF scaricabile non è ancora collegata: per ora usa questi dati manualmente, verrà aggiunta in un aggiornamento successivo.`);
     });
   });
   app.querySelectorAll('[data-riscatta-btn]').forEach(b=>{
@@ -2236,10 +2972,21 @@ function attachHandlers(){
       const premio = (DB.premi||DEFAULT_PREMI).find(p=>p.id===(sel&&sel.value));
       if(!c || !premio) return;
       if((c.punti||0) < premio.puntiRichiesti){ alert("Punti insufficienti per questo premio."); return; }
-      if(!confirm(`Riscattare "${premio.nome}" per ${c.nome}? Verranno scalati ${premio.puntiRichiesti} punti (saldo attuale: ${c.punti||0}).`)) return;
+      if(!confirm(`Riscattare "${premio.nome}" per ${c.nome}? Verranno scalati ${premio.puntiRichiesti} punti (saldo attuale: ${c.punti||0}) e verrà generato un buono da usare in salone.`)) return;
       c.punti = (c.punti||0) - premio.puntiRichiesti;
-      log(`Premio riscattato: "${premio.nome}" per ${c.nome} (-${premio.puntiRichiesti} punti, saldo residuo ${c.punti})`);
+      const scadenzaData = new Date(); scadenzaData.setMonth(scadenzaData.getMonth()+6);
+      const buono = {
+        codice: generaCodiceBuonoUnico(),
+        clienteId: c.id, clienteNome: c.nome,
+        premioNome: premio.nome, puntiSpesi: premio.puntiRichiesti,
+        creato: adessoISO(), scadenza: dataLocaleISO(scadenzaData),
+        stato: "disponibile"
+      };
+      if(!DB.buoni) DB.buoni = [];
+      DB.buoni.push(buono);
+      log(`Premio riscattato: "${premio.nome}" per ${c.nome} (-${premio.puntiRichiesti} punti) → buono ${buono.codice}`);
       saveDB(); render();
+      alert(`Buono generato: ${buono.codice}\nValido fino al ${fmtData(buono.scadenza)}.`);
     });
   });
   app.querySelectorAll('[data-punti-agg]').forEach(b=>{
@@ -2268,6 +3015,37 @@ function attachHandlers(){
         c.punti = (c.punti||0) - n;
       }
       log(`Punti fedeltà rimossi manualmente: -${n} a ${c.nome} (saldo ${c.punti})`);
+      saveDB(); render();
+    });
+  });
+  app.querySelectorAll('[data-segna-recensione]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const c = DB.clients.find(x=>x.id===b.dataset.segnaRecensione);
+      if(!c || c.recensioneAssegnata) return;
+      if(!confirm(`Confermi che ${c.nome} ha lasciato una recensione? Riceverà +${PUNTI_RECENSIONE} punti.`)) return;
+      c.punti = (c.punti||0) + PUNTI_RECENSIONE;
+      c.recensioneAssegnata = true;
+      log(`+${PUNTI_RECENSIONE} punti recensione a ${c.nome}`);
+      saveDB(); render();
+    });
+  });
+  const btnVerificaBuono = document.getElementById('btn-verifica-buono');
+  if(btnVerificaBuono) btnVerificaBuono.addEventListener('click', ()=>{
+    const codice = (document.getElementById('verifica-buono-codice').value||"").trim().toUpperCase();
+    const buono = (DB.buoni||[]).find(bu=>bu.codice===codice);
+    buonoVerificaRisultato = buono ? {trovato:true, buono} : {trovato:false};
+    render();
+  });
+  app.querySelectorAll('[data-usa-buono]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const codice = b.dataset.usaBuono;
+      const buono = (DB.buoni||[]).find(bu=>bu.codice===codice);
+      if(!buono || buono.stato==="utilizzato") return;
+      if(!confirm(`Segnare il buono ${codice} come utilizzato?`)) return;
+      buono.stato = "utilizzato";
+      buono.usatoIl = adessoISO();
+      log(`Buono utilizzato: ${codice} (${buono.premioNome}, ${buono.clienteNome})`);
+      buonoVerificaRisultato = {trovato:true, buono};
       saveDB(); render();
     });
   });
@@ -2363,26 +3141,31 @@ function attachHandlers(){
 }
 
 async function confermaPrenotazione(){
-  const servizio = getService(bookingState.serviceId);
+  const servizi = getServizi(bookingState.serviceIds);
   if(!clienteRecord){ alert("Devi accedere prima di prenotare."); return; }
+  const durataComplessiva = durataTotale(servizi);
+  const promoAttiva = promoApplicabile(servizi);
+  const prezzoComplessivo = prezzoConPromo(servizi, promoAttiva);
 
   let proId = bookingState.proId;
   if(!proId){
     const disponibili = DB.pros.filter(p=>p.aree.includes(bookingState.area) &&
-      !slotOccupato(p.id, bookingState.data, bookingState.ora, servizio.durata, null));
+      !slotOccupato(p.id, bookingState.data, bookingState.ora, durataComplessiva, null));
     proId = disponibili.length ? disponibili[0].id : DB.pros.find(p=>p.aree.includes(bookingState.area)).id;
   }
-  if(slotOccupato(proId, bookingState.data, bookingState.ora, servizio.durata, null)){
+  if(slotOccupato(proId, bookingState.data, bookingState.ora, durataComplessiva, null)){
     alert("Questo orario è appena stato occupato, scegline un altro.");
     render();
     return;
   }
 
   let pagamento = null;
-  if(servizio.prezzo > 30){
-    const scelta = prompt(`Servizio superiore a €30. Scrivi "50" per versare un acconto del 50% (€${calcolaAcconto(servizio.prezzo)}) oppure "saldo" per pagare subito l'intero importo (€${servizio.prezzo}):`, "50");
-    if(scelta==="saldo") pagamento = {tipo:"online", importo:servizio.prezzo, stato:"in_attesa"};
-    else if(scelta==="50") pagamento = {tipo:"acconto", importo:calcolaAcconto(servizio.prezzo), stato:"in_attesa"};
+  if(promoAttiva && promoAttiva.pagamentoObbligatorio){
+    pagamento = {tipo:"online", importo:prezzoComplessivo, stato:"in_attesa"};
+  } else if(prezzoComplessivo > 30){
+    const scelta = prompt(`Totale superiore a €30. Scrivi "50" per versare un acconto del 50% (€${calcolaAcconto(prezzoComplessivo)}) oppure "saldo" per pagare subito l'intero importo (€${prezzoComplessivo}):`, "50");
+    if(scelta==="saldo") pagamento = {tipo:"online", importo:prezzoComplessivo, stato:"in_attesa"};
+    else if(scelta==="50") pagamento = {tipo:"acconto", importo:calcolaAcconto(prezzoComplessivo), stato:"in_attesa"};
     else { alert("Devi scegliere una modalità di pagamento per confermare."); return; }
   }
 
@@ -2391,30 +3174,34 @@ async function confermaPrenotazione(){
     id: uid("a"),
     clienteId: cliente.id,
     area: bookingState.area,
-    serviceId: bookingState.serviceId,
+    serviceId: bookingState.serviceIds[0],
+    serviceIds: bookingState.serviceIds.slice(),
     proId,
     data: bookingState.data,
     ora: bookingState.ora,
     stato: "Confermato",
+    creatoDa: "Cliente (online)",
     pagamento,
+    promoId: promoAttiva ? promoAttiva.id : null,
+    prezzoPromo: promoAttiva ? prezzoComplessivo : null,
     creato: adessoISO()
   };
   DB.appts.push(appt);
-  log(`Nuova prenotazione: ${cliente.nome} — ${servizio.name} il ${appt.data} ${appt.ora} con ${getPro(proId).nome}`);
+  log(`Nuova prenotazione: ${cliente.nome} — ${nomiServizi(servizi)} il ${appt.data} ${appt.ora} con ${getPro(proId).nome}${promoAttiva?` (promo: ${promoAttiva.nome})`:''}`);
   await saveDB();
-  bookingState = {area:null, serviceId:null, proId:null, data:null, ora:null};
+  bookingState = {area:null, serviceIds:[], proId:null, data:null, ora:null};
   vistaClienteTab = "storico";
 
   if(pagamento && pagamento.stato==="in_attesa"){
     render();
-    await avviaPagamentoSumUp(appt, pagamento, servizio);
+    await avviaPagamentoSumUp(appt, pagamento, nomiServizi(servizi));
   } else {
     render();
     alert("Prenotazione confermata! Ti aspettiamo.");
   }
 }
 
-async function avviaPagamentoSumUp(appt, pagamento, servizio){
+async function avviaPagamentoSumUp(appt, pagamento, descrizioneServizio){
   try{
     const redirectUrl = location.origin + location.pathname + `?pagamento=ritorno&appt=${appt.id}`;
     const riferimentoTentativo = `${appt.id}-${Date.now()}`;
@@ -2423,7 +3210,7 @@ async function avviaPagamentoSumUp(appt, pagamento, servizio){
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
         importo: pagamento.importo,
-        descrizione: `${servizio.name} — Nima Hair & Beauty`,
+        descrizione: `${descrizioneServizio} — Nima Hair & Beauty`,
         riferimento: riferimentoTentativo,
         redirectUrl
       })
